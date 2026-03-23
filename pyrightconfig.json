@@ -1,0 +1,22 @@
+{
+  "include": [
+    "app",
+    "tests",
+    "main.py"
+  ],
+  "exclude": [
+    "**/__pycache__",
+    "data",
+    "logs"
+  ],
+  "pythonVersion": "3.10",
+  "typeCheckingMode": "basic",
+  "executionEnvironments": [
+    {
+      "root": ".",
+      "extraPaths": [
+        "."
+      ]
+    }
+  ]
+}
