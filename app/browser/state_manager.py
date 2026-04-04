@@ -7,7 +7,8 @@
 
 import json
 from pathlib import Path
-from typing import Any
+
+from playwright._impl._api_structures import StorageState
 
 from app.core.config import settings
 
@@ -61,7 +62,7 @@ class StateManager:
         """
         return str(self.state_file)
 
-    def save_state_data(self, state_data: dict[str, Any]) -> None:
+    def save_state_data(self, state_data: StorageState) -> None:
         """
         把登录状态数据保存成“更容易阅读”的 JSON 文件。
 

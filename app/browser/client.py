@@ -17,7 +17,7 @@
 """
 
 from playwright.sync_api import Browser, BrowserContext, Page, Playwright, sync_playwright
-from playwright._impl._api_structures import StorageState
+from playwright._impl._api_structures import ProxySettings, StorageState
 
 from app.browser.state_manager import StateManager
 from app.core.config import settings
@@ -72,25 +72,25 @@ class BrowserClient:
         # 启动 Playwright 的同步接口。
         self.playwright = sync_playwright().start()
 
-        launch_kwargs: dict[str, object] = {
-            "headless": settings.headless,
-        }
+        proxy_config: ProxySettings | None = None
 
         # 如果配置了代理，就在浏览器启动阶段一起接上。
         # 这样页面访问、登录流程、站内接口请求都会走同一条代理链路。
         if settings.proxy_server.strip():
-            proxy_config: dict[str, str] = {
+            proxy_config = {
                 "server": settings.proxy_server.strip(),
             }
             if settings.proxy_username.strip():
                 proxy_config["username"] = settings.proxy_username.strip()
             if settings.proxy_password.strip():
                 proxy_config["password"] = settings.proxy_password.strip()
-            launch_kwargs["proxy"] = proxy_config
 
         # 启动 Chromium 浏览器。
         # 是否显示窗口，由配置里的 `headless` 决定。
-        self.browser = self.playwright.chromium.launch(**launch_kwargs)
+        self.browser = self.playwright.chromium.launch(
+            headless=settings.headless,
+            proxy=proxy_config,
+        )
 
         # 如果本地已经有保存过的登录状态，就直接复用。
         # 这样通常不需要每次启动都重新登录。
