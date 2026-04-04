@@ -17,11 +17,14 @@
 
 from app.browser.client import BrowserClient
 from app.browser.login import PixivLoginService
+from app.crawler.author_crawler import AuthorCrawler
 from app.crawler.artwork_crawler import ArtworkCrawler
 from app.db.download_record_repository import DownloadRecordRepository
 from app.downloader.image_downloader import PixivImageDownloader
 from app.services.cli_service import (
+    AuthorCollectOptions,
     archive_old_records,
+    collect_author_options,
     choose_action,
     collect_artwork_ids,
     collect_retry_artwork_ids,
@@ -29,7 +32,12 @@ from app.services.cli_service import (
     parse_artwork_ids,
     show_history,
 )
-from app.services.task_service import print_batch_summary, process_artwork_batch
+from app.services.task_service import (
+    print_incremental_selection_summary,
+    print_batch_summary,
+    process_artwork_batch,
+    select_incremental_artwork_ids,
+)
 
 
 def main() -> None:
@@ -65,10 +73,14 @@ def main() -> None:
             archive_old_records(record_repository)
             return
 
+        author_request: AuthorCollectOptions | None = None
         if action == "retry_failed":
             artwork_ids = collect_retry_artwork_ids(record_repository)
             if not artwork_ids:
                 return
+        elif action == "crawl_author":
+            author_request = collect_author_options()
+            artwork_ids = []
         else:
             artwork_ids = collect_artwork_ids()
 
@@ -93,6 +105,39 @@ def main() -> None:
 
         crawler = ArtworkCrawler(client)
         downloader = PixivImageDownloader(client)
+
+        if action == "crawl_author":
+            # 对人来说，这里前面已经在 `crawl_author` 分支里赋过值了。
+            # 但类型检查器只看到：`author_request` 的类型是“元组或 None”。
+            # 所以这里显式拦一下，告诉它后面一定是可解包的元组。
+            if author_request is None:
+                raise RuntimeError("作者抓取模式缺少作者输入，请重新选择操作。")
+
+            user_id = author_request["user_id"]
+            limit = author_request["limit"]
+            author_crawler = AuthorCrawler(client)
+            author_artwork_ids = author_crawler.collect_author_artwork_ids(user_id, limit=limit)
+            if not author_artwork_ids:
+                print(f"未从作者 {user_id} 的主页里识别到作品 ID。")
+                return
+
+            print(f"已从作者 {user_id} 主页识别到 {len(author_artwork_ids)} 个作品。")
+
+            if author_request["update_mode"] == "incremental":
+                selection = select_incremental_artwork_ids(
+                    author_artwork_ids,
+                    record_repository,
+                    completed_streak_limit=author_request["completed_streak_limit"],
+                )
+                artwork_ids = selection["candidate_artwork_ids"]
+                print_incremental_selection_summary(selection)
+
+                if not artwork_ids:
+                    print("这位作者当前没有需要增量处理的新作品。")
+                    return
+            else:
+                artwork_ids = author_artwork_ids
+                print("当前使用全量模式，会按识别到的作品列表逐个处理。")
 
         print(f"本次共识别到 {len(artwork_ids)} 个作品 ID：{artwork_ids}")
 

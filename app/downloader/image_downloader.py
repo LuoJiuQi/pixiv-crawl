@@ -17,6 +17,7 @@ import mimetypes
 import re
 from html import unescape
 from pathlib import Path
+from urllib.parse import quote
 from urllib.parse import urlparse
 
 import httpx
@@ -339,6 +340,36 @@ class PixivImageDownloader:
 
         return cookies
 
+    def _build_proxy_url(self) -> str | None:
+        """
+        生成 `httpx` 可直接使用的代理地址。
+
+        代理如果不需要认证，直接返回原始地址。
+        如果需要认证，就把账号密码拼进 URL。
+        """
+        proxy_server = settings.proxy_server.strip()
+        if not proxy_server:
+            return None
+
+        proxy_username = settings.proxy_username.strip()
+        proxy_password = settings.proxy_password.strip()
+        if not proxy_username:
+            return proxy_server
+
+        parsed = urlparse(proxy_server)
+        if not parsed.scheme or not parsed.hostname:
+            return proxy_server
+
+        auth = quote(proxy_username, safe="")
+        if proxy_password:
+            auth += f":{quote(proxy_password, safe='')}"
+
+        host = parsed.hostname
+        if parsed.port:
+            host = f"{host}:{parsed.port}"
+
+        return f"{parsed.scheme}://{auth}@{host}"
+
     def _infer_extension(self, url: str, content_type: str | None = None) -> str:
         """
         推断图片文件扩展名。
@@ -365,24 +396,95 @@ class PixivImageDownloader:
 
         return ".bin"
 
+    def _sanitize_path_part(self, text: str) -> str:
+        """
+        把作者名这类文本清理成适合当文件夹名的样子。
+
+        Windows 文件系统对这些字符比较敏感：
+        `<>:"/\\|?*`
+        所以这里统一替换成下划线，避免保存文件时报错。
+        """
+        sanitized = re.sub(r'[<>:"/\\|?*]+', "_", text).strip(" .")
+        if not sanitized:
+            return "unknown_author"
+        return sanitized[:80]
+
+    def _build_author_folder_name(self, artwork: ArtworkInfo) -> str:
+        """
+        生成作者文件夹名。
+
+        目标是既尽量稳定，又尽量让人一眼能看懂：
+        - 优先保留作者名，方便直接浏览目录
+        - 如果有作者 ID，就顺手拼进去，减少重名概率
+        """
+        safe_author_name = self._sanitize_path_part(artwork.author_name or "unknown_author")
+        safe_user_id = self._sanitize_path_part(artwork.user_id)
+
+        if artwork.user_id:
+            return f"{safe_author_name}_{safe_user_id}"
+
+        return safe_author_name
+
+    def _build_file_stem(
+        self,
+        artwork: ArtworkInfo,
+        page_index: int,
+        total_pages: int,
+    ) -> str:
+        """
+        生成图片文件名的“主干部分”，不包含扩展名。
+
+        现在文件名会优先使用作品标题，但会始终带上作品 ID。
+
+        这样做的原因是：
+        - 单看标题更容易认图
+        - 但不同作品可能重名
+        - 只在撞名时再补 ID，会让“是否已下载”的判断变得不可靠
+
+        所以这里采用一个更稳妥的规则：
+        “标题负责好读，作品 ID 负责唯一性”
+
+        命名规则：
+        - 单图作品：`作品标题__作品ID`
+        - 多图作品：`作品标题__作品ID_p0`、`作品标题__作品ID_p1`
+        """
+        safe_title = self._sanitize_path_part(artwork.title or artwork.artwork_id)
+        base_name = f"{safe_title}__{artwork.artwork_id}"
+
+        if total_pages <= 1:
+            return base_name
+
+        return f"{base_name}_p{page_index}"
+
     def _build_output_path(
         self,
         artwork: ArtworkInfo,
         page_index: int,
         url: str,
         content_type: str | None = None,
+        total_pages: int | None = None,
     ) -> Path:
         """
         生成图片最终保存路径。
 
         目录结构当前是：
-        `data/images/作品ID/作品ID_p页码.扩展名`
+        `data/images/作者文件夹/作品标题__作品ID.扩展名`
+        或
+        `data/images/作者文件夹/作品标题__作品ID_p页码.扩展名`
+
+        也就是说，同一个作者的所有图片都会落进同一个目录里，
+        不再是一张作品一个文件夹。
         """
-        artwork_dir = self.download_dir / artwork.artwork_id
-        artwork_dir.mkdir(parents=True, exist_ok=True)
+        author_dir = self.download_dir / self._build_author_folder_name(artwork)
+        author_dir.mkdir(parents=True, exist_ok=True)
 
         extension = self._infer_extension(url, content_type=content_type)
-        return artwork_dir / f"{artwork.artwork_id}_p{page_index}{extension}"
+        stem = self._build_file_stem(
+            artwork,
+            page_index,
+            total_pages=total_pages if total_pages is not None else artwork.page_count,
+        )
+        return author_dir / f"{stem}{extension}"
 
     def _prepare_download_targets(self, artwork: ArtworkInfo) -> tuple[ArtworkInfo, list[tuple[int, str]]]:
         """
@@ -404,18 +506,24 @@ class PixivImageDownloader:
 
         return artwork, download_plan
 
-    def _find_existing_file_for_page(self, artwork_id: str, page_index: int) -> Path | None:
+    def _find_existing_file_for_page(
+        self,
+        artwork: ArtworkInfo,
+        page_index: int,
+        total_pages: int,
+    ) -> Path | None:
         """
         查找某一页是否已经有对应的本地文件。
 
-        这里故意不强依赖扩展名，因为历史文件可能是 `.jpg`、`.png`，
-        甚至早期错误保存过别的后缀。我们只关心“这一页是否已经存在可复用文件”。
+        这里故意不强依赖扩展名，因为图片可能是 `.jpg`、`.png`，
+        我们只关心“这一页是否已经存在可复用文件”。
         """
-        artwork_dir = self.download_dir / artwork_id
-        if not artwork_dir.exists():
+        author_dir = self.download_dir / self._build_author_folder_name(artwork)
+        if not author_dir.exists():
             return None
 
-        matches = sorted(artwork_dir.glob(f"{artwork_id}_p{page_index}.*"))
+        stem = self._build_file_stem(artwork, page_index, total_pages=total_pages)
+        matches = sorted(author_dir.glob(f"{stem}.*"))
         return matches[0] if matches else None
 
     def is_artwork_downloaded(self, artwork: ArtworkInfo) -> tuple[bool, list[str]]:
@@ -435,8 +543,13 @@ class PixivImageDownloader:
             return False, []
 
         existing_files: list[str] = []
+        total_pages = len(download_plan)
         for page_index, _ in download_plan:
-            existing_file = self._find_existing_file_for_page(artwork.artwork_id, page_index)
+            existing_file = self._find_existing_file_for_page(
+                artwork,
+                page_index,
+                total_pages=total_pages,
+            )
             if existing_file is None:
                 return False, []
             existing_files.append(str(existing_file))
@@ -459,19 +572,36 @@ class PixivImageDownloader:
         downloaded_files: list[str] = []
         headers = self._get_request_headers(artwork)
         cookies = self._build_cookies()
+        proxy_url = self._build_proxy_url()
+
+        client_kwargs: dict[str, object] = {
+            "headers": headers,
+            "cookies": cookies,
+            "follow_redirects": True,
+            "timeout": 60.0,
+        }
+        if proxy_url:
+            client_kwargs["proxy"] = proxy_url
 
         # 使用 `httpx.Client` 可以复用连接，效率更高。
-        with httpx.Client(
-            headers=headers,
-            cookies=cookies,
-            follow_redirects=True,
-            timeout=60.0,
-        ) as http_client:
+        with httpx.Client(**client_kwargs) as http_client:
+            total_pages = len(download_plan)
             for page_index, url in download_plan:
-                output_path = self._build_output_path(artwork, page_index, url)
-                if output_path.exists() and not overwrite:
-                    downloaded_files.append(str(output_path))
+                existing_file = self._find_existing_file_for_page(
+                    artwork,
+                    page_index,
+                    total_pages=total_pages,
+                )
+                if existing_file is not None and not overwrite:
+                    downloaded_files.append(str(existing_file))
                     continue
+
+                output_path = self._build_output_path(
+                    artwork,
+                    page_index,
+                    url,
+                    total_pages=total_pages,
+                )
 
                 response = http_client.get(url)
                 response.raise_for_status()
@@ -488,6 +618,7 @@ class PixivImageDownloader:
                     page_index,
                     str(response.url),
                     content_type=content_type,
+                    total_pages=total_pages,
                 )
 
                 # 把二进制图片内容写入本地文件。

@@ -1,0 +1,24 @@
+# Git and local tooling
+.git/
+.idea/
+.vscode/
+.venv/
+venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Local secrets
+.env
+
+# Runtime data
+data/
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db

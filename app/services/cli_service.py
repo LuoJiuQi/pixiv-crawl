@@ -14,10 +14,22 @@
 from datetime import datetime, timedelta
 from pathlib import Path
 import re
+from typing import Literal, TypedDict
 
 from app.db.download_record_repository import DownloadRecordRepository
 from app.services.failure_exporter import build_failure_export_path, export_failure_records
 from app.services.record_exporter import build_record_export_path, export_records
+
+
+class AuthorCollectOptions(TypedDict):
+    """
+    描述“按作者抓取”模式收集到的输入参数。
+    """
+
+    user_id: str
+    limit: int | None
+    update_mode: Literal["incremental", "full"]
+    completed_streak_limit: int
 
 
 def choose_action() -> str:
@@ -33,8 +45,9 @@ def choose_action() -> str:
     print("3. 重试失败任务")
     print("4. 导出失败清单")
     print("5. 归档并清理旧记录")
+    print("6. 按作者批量抓取作品")
 
-    choice = input("请输入 1、2、3、4 或 5，直接回车默认 1：").strip()
+    choice = input("请输入 1、2、3、4、5 或 6，直接回车默认 1：").strip()
     if choice == "2":
         return "history"
     if choice == "3":
@@ -43,6 +56,8 @@ def choose_action() -> str:
         return "export_failed"
     if choice == "5":
         return "archive_records"
+    if choice == "6":
+        return "crawl_author"
     return "crawl"
 
 
@@ -65,6 +80,29 @@ def parse_artwork_ids(raw_text: str) -> list[str]:
             artwork_ids.append(artwork_id)
 
     return artwork_ids
+
+
+def parse_user_id(raw_text: str) -> str:
+    """
+    从一段文本里解析出作者用户 ID。
+
+    支持这些输入形式：
+    - 纯数字：`123456`
+    - 作者主页：`https://www.pixiv.net/users/123456`
+    - 旧式链接：`https://www.pixiv.net/member.php?id=123456`
+    """
+    patterns = [
+        r"https?://www\.pixiv\.net/(?:[a-z]{2}/)?users/(\d+)",
+        r"https?://www\.pixiv\.net/member\.php\?id=(\d+)",
+        r"\b(\d+)\b",
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, raw_text)
+        if match:
+            return match.group(1)
+
+    return ""
 
 
 def collect_artwork_ids() -> list[str]:
@@ -96,6 +134,52 @@ def collect_artwork_ids() -> list[str]:
         raise RuntimeError("没有识别到有效的作品 ID，请检查输入格式。")
 
     return artwork_ids
+
+
+def collect_author_options() -> AuthorCollectOptions:
+    """
+    读取“按作者批量抓取”模式需要的输入。
+
+    当前这里会额外询问“更新方式”，因为作者模式最适合长期使用，
+    所以默认会走“增量更新”：
+    - 新作品处理
+    - 失败作品重试
+    - 已完成老作品连续出现很多个后，提前停止
+    """
+    print("请输入 Pixiv 作者 ID 或作者主页链接。")
+    raw_author = input("作者：").strip()
+
+    user_id = parse_user_id(raw_author)
+    if not user_id:
+        raise RuntimeError("没有识别到有效的作者 ID，请检查输入格式。")
+
+    raw_limit = input("最多抓取多少个作品（直接回车默认全部）：").strip()
+    if raw_limit.isdigit() and int(raw_limit) > 0:
+        limit = int(raw_limit)
+    else:
+        limit = None
+
+    raw_mode = input("更新方式（incremental/full，直接回车默认 incremental）：").strip().lower()
+    update_mode: Literal["incremental", "full"]
+    if raw_mode == "full":
+        update_mode = "full"
+    else:
+        update_mode = "incremental"
+
+    completed_streak_limit = 10
+    if update_mode == "incremental":
+        raw_streak_limit = input(
+            "连续遇到多少个已完成作品后停止扫描（直接回车默认 10）："
+        ).strip()
+        if raw_streak_limit.isdigit() and int(raw_streak_limit) > 0:
+            completed_streak_limit = int(raw_streak_limit)
+
+    return {
+        "user_id": user_id,
+        "limit": limit,
+        "update_mode": update_mode,
+        "completed_streak_limit": completed_streak_limit,
+    }
 
 
 def collect_history_options() -> tuple[str | None, str | None, int]:

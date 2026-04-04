@@ -61,6 +61,26 @@ class BatchRunSummary(TypedDict):
     failed_results: list[FailedResult]
 
 
+class IncrementalSelectionResult(TypedDict):
+    """
+    描述“按作者增量更新时，筛选出来的任务集合”。
+
+    这里除了最终要处理的作品 ID，
+    还额外保留一些统计信息，方便在终端里解释：
+    - 为什么这次只处理这些作品
+    - 为什么提前停止继续往后扫描
+    """
+
+    candidate_artwork_ids: list[str]
+    new_artwork_ids: list[str]
+    retry_artwork_ids: list[str]
+    skipped_completed_ids: list[str]
+    scanned_artwork_count: int
+    total_available_artwork_count: int
+    stopped_early: bool
+    stop_after_completed_streak: int
+
+
 def _truncate_text(text: str, max_length: int = 120) -> str:
     """
     把过长的文本裁短一点，避免一行直接刷满整个终端。
@@ -231,6 +251,104 @@ def process_artwork(
         "skipped_download": False,
         "skipped_by_db": False,
     }
+
+
+def select_incremental_artwork_ids(
+    artwork_ids: list[str],
+    record_repository: DownloadRecordRepository,
+    completed_streak_limit: int = 10,
+) -> IncrementalSelectionResult:
+    """
+    从作者作品列表里挑出“这次真正需要处理”的作品。
+
+    增量更新的核心规则是：
+    - 数据库里没有记录的作品，要处理
+    - 数据库里记录为 `failed` 的作品，要处理
+    - 数据库里已经 `completed` 的老作品，先跳过
+
+    另外再加一个“提前停止”规则：
+    - 如果连续遇到很多个已完成老作品，
+      说明后面大概率也都是更老的作品
+    - 这时就不必继续往后扫了
+    """
+    candidate_artwork_ids: list[str] = []
+    new_artwork_ids: list[str] = []
+    retry_artwork_ids: list[str] = []
+    skipped_completed_ids: list[str] = []
+    completed_streak = 0
+    stopped_early = False
+    scanned_artwork_count = 0
+
+    for artwork_id in artwork_ids:
+        scanned_artwork_count += 1
+        record = record_repository.get_record(artwork_id)
+
+        # 没见过的新作品，当然要处理。
+        if record is None:
+            candidate_artwork_ids.append(artwork_id)
+            new_artwork_ids.append(artwork_id)
+            completed_streak = 0
+            continue
+
+        # 以前失败过的作品，这次继续纳入候选。
+        if record["status"] != "completed":
+            candidate_artwork_ids.append(artwork_id)
+            retry_artwork_ids.append(artwork_id)
+            completed_streak = 0
+            continue
+
+        # 走到这里，说明它已经完成过了。
+        skipped_completed_ids.append(artwork_id)
+        completed_streak += 1
+
+        if completed_streak_limit > 0 and completed_streak >= completed_streak_limit:
+            stopped_early = True
+            break
+
+    return {
+        "candidate_artwork_ids": candidate_artwork_ids,
+        "new_artwork_ids": new_artwork_ids,
+        "retry_artwork_ids": retry_artwork_ids,
+        "skipped_completed_ids": skipped_completed_ids,
+        "scanned_artwork_count": scanned_artwork_count,
+        "total_available_artwork_count": len(artwork_ids),
+        "stopped_early": stopped_early,
+        "stop_after_completed_streak": completed_streak_limit,
+    }
+
+
+def print_incremental_selection_summary(selection: IncrementalSelectionResult) -> None:
+    """
+    把作者增量筛选结果用更直观的方式打印出来。
+
+    这一步的重点不是“把所有 ID 都原样倒出来”，
+    而是先让你快速看懂这次任务的大盘：
+    - 总共识别到多少作品
+    - 实际扫描了多少
+    - 新作品有多少
+    - 失败重试有多少
+    - 已完成跳过有多少
+    - 有没有因为连续老作品太多而提前停止
+    """
+    print("当前使用增量更新模式。")
+    print(f"作者作品总数：{selection['total_available_artwork_count']}")
+    print(f"本次实际扫描数量：{selection['scanned_artwork_count']}")
+    print(f"新作品数量：{len(selection['new_artwork_ids'])}")
+    print(f"失败待重试数量：{len(selection['retry_artwork_ids'])}")
+    print(f"已完成并跳过数量：{len(selection['skipped_completed_ids'])}")
+    print(f"本次最终待处理数量：{len(selection['candidate_artwork_ids'])}")
+
+    if selection["new_artwork_ids"]:
+        print("新作品 ID：", selection["new_artwork_ids"])
+
+    if selection["retry_artwork_ids"]:
+        print("失败待重试作品 ID：", selection["retry_artwork_ids"])
+
+    if selection["stopped_early"]:
+        print(
+            "已触发提前停止："
+            f"连续遇到 {selection['stop_after_completed_streak']} 个已完成老作品后，停止继续往后扫描。"
+        )
 
 
 def _build_completed_result_from_record(

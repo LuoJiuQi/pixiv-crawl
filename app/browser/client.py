@@ -17,6 +17,7 @@
 """
 
 from playwright.sync_api import Browser, BrowserContext, Page, Playwright, sync_playwright
+from playwright._impl._api_structures import StorageState
 
 from app.browser.state_manager import StateManager
 from app.core.config import settings
@@ -71,9 +72,25 @@ class BrowserClient:
         # 启动 Playwright 的同步接口。
         self.playwright = sync_playwright().start()
 
+        launch_kwargs: dict[str, object] = {
+            "headless": settings.headless,
+        }
+
+        # 如果配置了代理，就在浏览器启动阶段一起接上。
+        # 这样页面访问、登录流程、站内接口请求都会走同一条代理链路。
+        if settings.proxy_server.strip():
+            proxy_config: dict[str, str] = {
+                "server": settings.proxy_server.strip(),
+            }
+            if settings.proxy_username.strip():
+                proxy_config["username"] = settings.proxy_username.strip()
+            if settings.proxy_password.strip():
+                proxy_config["password"] = settings.proxy_password.strip()
+            launch_kwargs["proxy"] = proxy_config
+
         # 启动 Chromium 浏览器。
         # 是否显示窗口，由配置里的 `headless` 决定。
-        self.browser = self.playwright.chromium.launch(headless=settings.headless)
+        self.browser = self.playwright.chromium.launch(**launch_kwargs)
 
         # 如果本地已经有保存过的登录状态，就直接复用。
         # 这样通常不需要每次启动都重新登录。
@@ -131,11 +148,10 @@ class BrowserClient:
         if self.context is None:
             raise RuntimeError("浏览器上下文不存在，无法保存登录状态")
 
-        # 再次确保目录存在，避免写文件时报错。
-        self.state_manager.ensure_state_dir()
-
-        # Playwright 会把当前上下文状态序列化到指定文件中。
-        self.context.storage_state(path=self.state_manager.get_state_file())
+        # 先让 Playwright 返回原始状态数据，
+        # 再交给 `StateManager` 统一写成可读版 JSON。
+        state_data: StorageState = self.context.storage_state()
+        self.state_manager.save_state_data(state_data)
 
     def close(self) -> None:
         """

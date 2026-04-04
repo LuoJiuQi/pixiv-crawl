@@ -27,6 +27,7 @@ data/state/
 data/images/
 data/exports/
 data/*.db
+data/temp/
 
 # Temporary / local-only cache
 *.log

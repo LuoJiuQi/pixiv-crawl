@@ -5,7 +5,9 @@
 它能帮助程序在下次运行时复用上一次的登录结果。
 """
 
+import json
 from pathlib import Path
+from typing import Any
 
 from app.core.config import settings
 
@@ -58,6 +60,21 @@ class StateManager:
         有些第三方库更喜欢接收字符串路径，而不是 `Path` 对象。
         """
         return str(self.state_file)
+
+    def save_state_data(self, state_data: dict[str, Any]) -> None:
+        """
+        把登录状态数据保存成“更容易阅读”的 JSON 文件。
+
+        Playwright 默认直接落盘时，文件通常会是一整行，
+        调试 cookies 或 localStorage 时会比较费眼。
+        所以这里统一改成：
+        - 缩进 2 空格
+        - 保留中文
+        - 末尾自动换行
+        """
+        self.ensure_state_dir()
+        formatted_json = json.dumps(state_data, ensure_ascii=False, indent=2)
+        self.state_file.write_text(formatted_json + "\n", encoding="utf-8")
 
     def delete_state(self) -> None:
         """

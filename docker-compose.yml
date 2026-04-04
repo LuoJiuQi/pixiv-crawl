@@ -1,0 +1,24 @@
+services:
+  pixiv-crawl:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: pixiv-crawl:local
+    container_name: pixiv-crawl
+    working_dir: /app
+    command: python main.py
+    env_file:
+      - .env
+    environment:
+      # 容器默认走无头模式。
+      # 代理配置不需要在这里重复写，只要 `.env` 里有 PROXY_SERVER 等变量，
+      # `env_file` 就会一起传进容器。
+      HEADLESS: "true"
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    stdin_open: true
+    tty: true
+    init: true
+    ipc: host

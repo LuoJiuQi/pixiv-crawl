@@ -41,6 +41,17 @@ class Settings(BaseSettings):
     # True：浏览器在后台运行，看不到窗口，适合自动化。
     headless: bool = False
 
+    # 可选代理设置。
+    # 如果你所在网络环境无法直接访问 Pixiv，
+    # 可以在 `.env` 里填写代理地址，例如：
+    # `http://host.docker.internal:7890`
+    # `socks5://127.0.0.1:7890`
+    proxy_server: str = ""
+
+    # 如果代理要求认证，就再补账号密码。
+    proxy_username: str = ""
+    proxy_password: str = ""
+
     # 默认超时时间，单位是毫秒。
     # 30000 毫秒 = 30 秒。
     timeout: int = 30000

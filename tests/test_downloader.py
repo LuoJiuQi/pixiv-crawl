@@ -43,6 +43,56 @@ class PixivImageDownloaderTestCase(unittest.TestCase):
     def setUp(self) -> None:
         self.downloader = PixivImageDownloader(make_dummy_client())
 
+    def test_build_author_folder_name_prefers_author_name_and_user_id(self) -> None:
+        artwork = ArtworkInfo(
+            artwork_id="123456789",
+            user_id="998877",
+            author_name="mignon",
+        )
+
+        folder_name = self.downloader._build_author_folder_name(artwork)
+
+        self.assertEqual(folder_name, "mignon_998877")
+
+    def test_build_file_stem_uses_title_for_single_page_artwork(self) -> None:
+        artwork = ArtworkInfo(
+            artwork_id="123456789",
+            title="引きこもりの妹が制服を着てみた回",
+            page_count=1,
+        )
+
+        stem = self.downloader._build_file_stem(artwork, page_index=0, total_pages=1)
+
+        self.assertEqual(stem, "引きこもりの妹が制服を着てみた回__123456789")
+
+    def test_build_file_stem_adds_page_suffix_for_multi_page_artwork(self) -> None:
+        artwork = ArtworkInfo(
+            artwork_id="123456789",
+            title="制服まとめ",
+            page_count=3,
+        )
+
+        stem = self.downloader._build_file_stem(artwork, page_index=1, total_pages=3)
+
+        self.assertEqual(stem, "制服まとめ__123456789_p1")
+
+    def test_build_file_stem_keeps_artworks_unique_even_when_titles_match(self) -> None:
+        first_artwork = ArtworkInfo(
+            artwork_id="111111111",
+            title="同名作品",
+            page_count=1,
+        )
+        second_artwork = ArtworkInfo(
+            artwork_id="222222222",
+            title="同名作品",
+            page_count=1,
+        )
+
+        first_stem = self.downloader._build_file_stem(first_artwork, page_index=0, total_pages=1)
+        second_stem = self.downloader._build_file_stem(second_artwork, page_index=0, total_pages=1)
+
+        self.assertNotEqual(first_stem, second_stem)
+
     def test_build_download_plan_prefers_original_image(self) -> None:
         artwork = ArtworkInfo(
             artwork_id="142543623",
@@ -190,6 +240,9 @@ class PixivImageDownloaderTestCase(unittest.TestCase):
     def test_is_artwork_downloaded_returns_true_when_all_pages_exist(self) -> None:
         artwork = ArtworkInfo(
             artwork_id="123456789",
+            user_id="998877",
+            author_name="mignon",
+            title="制服まとめ",
             page_count=2,
             possible_image_urls=[
                 "https://i.pximg.net/img-original/img/2026/03/20/15/42/15/123456789_p0.jpg",
@@ -198,12 +251,12 @@ class PixivImageDownloaderTestCase(unittest.TestCase):
         )
 
         with TemporaryDirectory() as temp_dir:
-            artwork_dir = Path(temp_dir) / artwork.artwork_id
-            artwork_dir.mkdir(parents=True, exist_ok=True)
-            (artwork_dir / "123456789_p0.jpg").write_bytes(b"p0")
-            (artwork_dir / "123456789_p1.png").write_bytes(b"p1")
-
             downloader = LocalOnlyDownloader(make_dummy_client(), download_dir=temp_dir)
+            author_dir = Path(temp_dir) / downloader._build_author_folder_name(artwork)
+            author_dir.mkdir(parents=True, exist_ok=True)
+            (author_dir / "制服まとめ__123456789_p0.jpg").write_bytes(b"p0")
+            (author_dir / "制服まとめ__123456789_p1.png").write_bytes(b"p1")
+
             is_downloaded, existing_files = downloader.is_artwork_downloaded(artwork)
 
         self.assertTrue(is_downloaded)
@@ -212,6 +265,9 @@ class PixivImageDownloaderTestCase(unittest.TestCase):
     def test_is_artwork_downloaded_returns_false_when_pages_are_missing(self) -> None:
         artwork = ArtworkInfo(
             artwork_id="123456789",
+            user_id="998877",
+            author_name="mignon",
+            title="制服まとめ",
             page_count=2,
             possible_image_urls=[
                 "https://i.pximg.net/img-original/img/2026/03/20/15/42/15/123456789_p0.jpg",
@@ -220,11 +276,11 @@ class PixivImageDownloaderTestCase(unittest.TestCase):
         )
 
         with TemporaryDirectory() as temp_dir:
-            artwork_dir = Path(temp_dir) / artwork.artwork_id
-            artwork_dir.mkdir(parents=True, exist_ok=True)
-            (artwork_dir / "123456789_p0.jpg").write_bytes(b"p0")
-
             downloader = LocalOnlyDownloader(make_dummy_client(), download_dir=temp_dir)
+            author_dir = Path(temp_dir) / downloader._build_author_folder_name(artwork)
+            author_dir.mkdir(parents=True, exist_ok=True)
+            (author_dir / "制服まとめ__123456789_p0.jpg").write_bytes(b"p0")
+
             is_downloaded, existing_files = downloader.is_artwork_downloaded(artwork)
 
         self.assertFalse(is_downloaded)
