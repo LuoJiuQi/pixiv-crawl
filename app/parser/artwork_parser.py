@@ -45,8 +45,9 @@ class ArtworkParser:
         所以这里只需要保存一次即可。
         """
         self.html = html
+        self._snapshot: dict[str, Any] | None = None
 
-    def _extract_meta(self, name: str, attr: str = "property") -> str:
+    def _extract_meta_value(self, name: str, attr: str = "property") -> str:
         """
         从 `<meta>` 标签里提取内容。
 
@@ -70,6 +71,16 @@ class ArtworkParser:
                 # `unescape` 用来把 HTML 转义字符恢复成正常文本。
                 return unescape(match.group(1)).strip()
 
+        return ""
+
+    def _extract_meta(self, name: str, attr: str = "property") -> str:
+        """
+        从 snapshot 中读取常用 meta 信息。
+        """
+        snapshot = self._get_snapshot()
+        meta = snapshot.get("meta", {})
+        if isinstance(meta, dict):
+            return str(meta.get((attr, name), ""))
         return ""
 
     def _extract_first_match(self, patterns: list[str], flags: int = re.I | re.S) -> str:
@@ -133,14 +144,313 @@ class ArtworkParser:
                 current_path = f"{path}[{i}]"
                 self._walk_find_keys(item, target_keys, results, current_path)
 
-    def extract_title(self) -> str:
+    def _find_first_value_by_keys(self, obj: Any, target_keys: set[str]) -> str:
         """
-        提取页面 `<title>` 标签内容。
+        从嵌套结构里找第一个可读字符串值。
+        """
+        results: list[tuple[str, Any]] = []
+        self._walk_find_keys(obj, target_keys, results)
+
+        for _, value in results:
+            text = str(value).strip()
+            if text:
+                return text
+        return ""
+
+    def _extract_title_from_html(self) -> str:
+        """
+        直接从 HTML 中提取 `<title>`。
         """
         match = re.search(r"<title[^>]*>(.*?)</title>", self.html, re.I | re.S)
         if match:
             return unescape(match.group(1)).strip()
         return ""
+
+    def _extract_next_data_raw(self) -> dict[str, Any]:
+        """
+        直接从 HTML 中提取 `__NEXT_DATA__`。
+        """
+        match = re.search(
+            r'<script[^>]*id="__NEXT_DATA__"[^>]*>(.*?)</script>',
+            self.html,
+            re.I | re.S,
+        )
+        if not match:
+            return {}
+
+        raw_json = match.group(1).strip()
+        parsed = self._safe_json_loads(raw_json)
+        return parsed if isinstance(parsed, dict) else {}
+
+    def _extract_server_preloaded_state_raw(self, next_data: dict[str, Any]) -> dict[str, Any]:
+        """
+        从已经提取的 `__NEXT_DATA__` 中读取预加载状态。
+        """
+        page_props = next_data.get("props", {}).get("pageProps", {})
+        raw_state = page_props.get("serverSerializedPreloadedState")
+
+        if not isinstance(raw_state, str) or not raw_state.strip():
+            return {}
+
+        parsed = self._safe_json_loads(raw_state)
+        return parsed if isinstance(parsed, dict) else {}
+
+    def _extract_possible_image_urls_raw(self, artwork_id: str) -> list[str]:
+        """
+        直接从 HTML 中扫描作品相关图片候选地址。
+        """
+        patterns: list[str] = []
+
+        if artwork_id:
+            escaped_artwork_id = re.escape(artwork_id)
+            patterns.extend(
+                [
+                    rf'https://i\.pximg\.net[^\s"\']*{escaped_artwork_id}_p\d+[^\s"\']*',
+                    rf'https://i-cf\.pximg\.net[^\s"\']*{escaped_artwork_id}_p\d+[^\s"\']*',
+                    rf'https://embed\.pixiv\.net/artwork\.php\?illust_id={escaped_artwork_id}[^\s"\']*',
+                    rf'https://[^"\']*pixiv\.net/artwork\.php\?illust_id={escaped_artwork_id}[^\s"\']*',
+                ]
+            )
+        else:
+            patterns.extend(
+                [
+                    r'https://i\.pximg\.net[^\s"\']+',
+                    r'https://i-cf\.pximg\.net[^\s"\']+',
+                    r'https://embed\.pixiv\.net[^\s"\']+',
+                    r'https://[^"\']*pximg\.net[^"\']+',
+                    r'https://[^"\']*pixiv\.net/artwork\.php[^"\']+',
+                ]
+            )
+
+        results: list[str] = []
+        for pattern in patterns:
+            matches = re.findall(pattern, self.html, re.I | re.S)
+            for url in matches:
+                normalized = unescape(url.replace("\\/", "/").replace("\\u0026", "&")).rstrip("\\").strip()
+                if not normalized:
+                    continue
+                if "/user-profile/" in normalized:
+                    continue
+                if re.search(r'_(50|170)\.(jpg|jpeg|png|webp)$', normalized, re.I):
+                    continue
+                if normalized not in results:
+                    results.append(normalized)
+
+        return results
+
+    def _append_tag(self, tags: list[str], raw_tag: Any) -> None:
+        """
+        统一做 tag 清洗和去重。
+        """
+        text = unescape(str(raw_tag or "")).strip()
+        if not text:
+            return
+        if text.startswith("http://") or text.startswith("https://"):
+            return
+        if "fanbox" in text.lower():
+            return
+        if len(text) > 40:
+            return
+        if text not in tags:
+            tags.append(text)
+
+    def _extract_tags_from_structured_hits(self) -> list[str]:
+        """
+        从结构化数据命中里提取 tag。
+
+        这里优先取原始 tag 文本，不取翻译字段。
+        """
+        tags: list[str] = []
+        hits = self.extract_next_data_hits() + self.extract_preloaded_state_hits()
+
+        for key_path, value in hits:
+            if key_path.endswith(".tag") or key_path == "tag":
+                self._append_tag(tags, value)
+                continue
+
+            if key_path.endswith(".tags") or key_path == "tags":
+                if isinstance(value, list):
+                    for item in value:
+                        if isinstance(item, dict):
+                            self._append_tag(tags, item.get("tag", ""))
+                        else:
+                            self._append_tag(tags, item)
+                elif isinstance(value, dict):
+                    self._append_tag(tags, value.get("tag", ""))
+
+        return tags
+
+    def _extract_tags_from_footer_dom(self) -> list[str]:
+        """
+        从作品页底部的 tag DOM 中提取原始 tag。
+        """
+        patterns = [
+            r'<a[^>]+class="[^"]*gtm-new-work-tag-event-click[^"]*"[^>]*>(.*?)</a>',
+            r"<a[^>]+class='[^']*gtm-new-work-tag-event-click[^']*'[^>]*>(.*?)</a>",
+        ]
+
+        tags: list[str] = []
+        for pattern in patterns:
+            for match in re.findall(pattern, self.html, re.I | re.S):
+                text = re.sub(r"<[^>]+>", "", match)
+                self._append_tag(tags, text)
+
+        return tags
+
+    def _extract_tags_from_description(self) -> list[str]:
+        """
+        从 description 文本中兜底提取标签。
+        """
+        tags: list[str] = []
+        description = self.extract_description()
+        quoted_tags = re.findall(r'「(.*?)」', description)
+
+        for tag in quoted_tags:
+            self._append_tag(tags, tag)
+
+        return tags
+
+    def _extract_artwork_id_from_text(self, text: str) -> str:
+        """
+        从单个文本片段里提取作品 ID。
+
+        这里只接受更接近“当前页标识”的格式，
+        避免在整页结构化数据里误捡到推荐作品的 ID。
+        """
+        if not text:
+            return ""
+
+        match = re.search(r"/artworks/(\d+)", text, re.I)
+        if match:
+            return match.group(1)
+
+        match = re.search(r"illust_id=(\d+)", text, re.I)
+        if match:
+            return match.group(1)
+
+        match = re.search(r"/(\d+)_p\d+", text, re.I)
+        if match:
+            return match.group(1)
+
+        return ""
+
+    def _extract_current_artwork_id(
+        self,
+        meta: dict[tuple[str, str], str],
+        next_data: dict[str, Any],
+        preloaded_state: dict[str, Any],
+    ) -> str:
+        """
+        优先提取“当前作品页”的作品 ID。
+
+        先信任 canonical / og:image 这类当前页专属字段，
+        只有这些都缺失时，才退回到宽松的结构化搜索。
+        """
+        current_page_candidates = [
+            str(meta.get(("link", "canonical"), "")),
+            str(meta.get(("property", "og:image"), "")),
+            self._extract_first_match(
+                [
+                    r'<link[^>]+rel="canonical"[^>]+href="(.*?)"',
+                    r"<link[^>]+rel='canonical'[^>]+href='(.*?)'",
+                ]
+            ),
+        ]
+
+        for candidate in current_page_candidates:
+            artwork_id = self._extract_artwork_id_from_text(candidate)
+            if artwork_id:
+                return artwork_id
+
+        structured_artwork_id = (
+            self._find_first_value_by_keys(preloaded_state, {"illustId", "artworkId"})
+            or self._find_first_value_by_keys(next_data, {"illustId", "artworkId"})
+        )
+        if structured_artwork_id:
+            return structured_artwork_id
+
+        return self._extract_first_match(
+            [
+                r"/artworks/(\d+)",
+                r'illust_id=(\d+)',
+            ],
+            flags=re.I,
+        )
+
+    def _build_snapshot(self) -> dict[str, Any]:
+        """
+        一次性构建解析过程里会反复复用的页面快照。
+        """
+        title = self._extract_title_from_html()
+        meta = {
+            ("property", "og:title"): self._extract_meta_value("og:title"),
+            ("property", "og:image"): self._extract_meta_value("og:image"),
+            ("name", "description"): self._extract_meta_value("description", attr="name"),
+            ("link", "canonical"): self._extract_first_match(
+                [
+                    r'<link[^>]+rel="canonical"[^>]+href="(.*?)"',
+                    r"<link[^>]+rel='canonical'[^>]+href='(.*?)'",
+                    r'<link[^>]+href="(.*?)"[^>]+rel="canonical"',
+                    r"<link[^>]+href='(.*?)'[^>]+rel='canonical'",
+                ]
+            ),
+        }
+
+        next_data = self._extract_next_data_raw()
+        preloaded_state = self._extract_server_preloaded_state_raw(next_data)
+
+        target_keys = {
+            "pageCount",
+            "illustId",
+            "artworkId",
+            "userId",
+            "userName",
+            "authorName",
+            "artistName",
+            "authorId",
+            "tags",
+            "tag",
+            "urls",
+            "original",
+            "regular",
+            "small",
+            "thumb",
+            "page_count",
+        }
+        next_data_hits: list[tuple[str, Any]] = []
+        preloaded_state_hits: list[tuple[str, Any]] = []
+        if next_data:
+            self._walk_find_keys(next_data, target_keys, next_data_hits)
+        if preloaded_state:
+            self._walk_find_keys(preloaded_state, target_keys, preloaded_state_hits)
+
+        artwork_id = self._extract_current_artwork_id(meta, next_data, preloaded_state)
+
+        return {
+            "title": title,
+            "meta": meta,
+            "next_data": next_data,
+            "preloaded_state": preloaded_state,
+            "next_data_hits": next_data_hits,
+            "preloaded_state_hits": preloaded_state_hits,
+            "artwork_id": artwork_id,
+            "possible_image_urls": self._extract_possible_image_urls_raw(artwork_id),
+        }
+
+    def _get_snapshot(self) -> dict[str, Any]:
+        """
+        惰性获取页面快照，只构建一次。
+        """
+        if self._snapshot is None:
+            self._snapshot = self._build_snapshot()
+        return self._snapshot
+
+    def extract_title(self) -> str:
+        """
+        提取页面 `<title>` 标签内容。
+        """
+        snapshot = self._get_snapshot()
+        return str(snapshot.get("title", ""))
 
     def extract_og_title(self) -> str:
         """
@@ -166,13 +476,11 @@ class ArtworkParser:
 
         canonical 可以理解成“这页内容的标准 URL”。
         """
-        patterns = [
-            r'<link[^>]+rel="canonical"[^>]+href="(.*?)"',
-            r"<link[^>]+rel='canonical'[^>]+href='(.*?)'",
-            r'<link[^>]+href="(.*?)"[^>]+rel="canonical"',
-            r"<link[^>]+href='(.*?)'[^>]+rel='canonical'",
-        ]
-        return self._extract_first_match(patterns)
+        snapshot = self._get_snapshot()
+        meta = snapshot.get("meta", {})
+        if isinstance(meta, dict):
+            return str(meta.get(("link", "canonical"), ""))
+        return ""
 
     def extract_artwork_id(self) -> str:
         """
@@ -185,13 +493,8 @@ class ArtworkParser:
 
         所以这里会尝试多个入口。
         """
-        patterns = [
-            r'/artworks/(\d+)',
-            r'"illustId":"?(\d+)"?',
-            r'"artworkId":"?(\d+)"?',
-            r'illust_id=(\d+)',
-        ]
-        return self._extract_first_match(patterns, flags=re.I)
+        snapshot = self._get_snapshot()
+        return str(snapshot.get("artwork_id", ""))
 
     def extract_author_name(self) -> str:
         """
@@ -202,16 +505,24 @@ class ArtworkParser:
         2. JSON 里的作者字段
         3. `og:title` 或 `<title>` 里带的作者名
         """
+        snapshot = self._get_snapshot()
+        author_name = self._find_first_value_by_keys(
+            snapshot.get("preloaded_state", {}),
+            {"authorName", "artistName", "userName"},
+        ) or self._find_first_value_by_keys(
+            snapshot.get("next_data", {}),
+            {"authorName", "artistName", "userName"},
+        )
+        if author_name:
+            return author_name
+
         patterns = [
             r'<a[^>]+data-gtm-value="\d+"[^>]+href="/users/\d+"><div[^>]+title="(.*?)"',
             r'<a[^>]+data-gtm-value="\d+"[^>]+href="/users/\d+"><div>(.*?)</div></a>',
-            r'"authorName":"(.*?)"',
-            r'"artistName":"(.*?)"',
             r'<meta[^>]+property="og:title"[^>]+content=".*? - (.*?)的插画 - pixiv"',
             r"<meta[^>]+property='og:title'[^>]+content='.*? - (.*?)的插画 - pixiv'",
             r'<title>.*? - (.*?)的插画 - pixiv</title>',
         ]
-
         author_name = self._extract_first_match(patterns)
         if author_name:
             return author_name
@@ -231,18 +542,9 @@ class ArtworkParser:
         这个字段往往比直接解析页面 DOM 更稳定，
         因为很多首屏数据都藏在这里。
         """
-        match = re.search(
-            r'<script[^>]*id="__NEXT_DATA__"[^>]*>(.*?)</script>',
-            self.html,
-            re.I | re.S,
-        )
-        if not match:
-            return {}
-
-        # `<script>` 标签里的内容本身就是一整段 JSON。
-        raw_json = match.group(1).strip()
-        parsed = self._safe_json_loads(raw_json)
-        return parsed if isinstance(parsed, dict) else {}
+        snapshot = self._get_snapshot()
+        next_data = snapshot.get("next_data", {})
+        return next_data if isinstance(next_data, dict) else {}
 
     def extract_server_preloaded_state(self) -> dict[str, Any]:
         """
@@ -251,15 +553,9 @@ class ArtworkParser:
         注意这个字段经常是“字符串形式的 JSON”，
         所以这里还要再做一次 JSON 解析。
         """
-        next_data = self.extract_next_data()
-        page_props = next_data.get("props", {}).get("pageProps", {})
-        raw_state = page_props.get("serverSerializedPreloadedState")
-
-        if not isinstance(raw_state, str) or not raw_state.strip():
-            return {}
-
-        parsed = self._safe_json_loads(raw_state)
-        return parsed if isinstance(parsed, dict) else {}
+        snapshot = self._get_snapshot()
+        preloaded_state = snapshot.get("preloaded_state", {})
+        return preloaded_state if isinstance(preloaded_state, dict) else {}
 
     def extract_next_data_hits(self) -> list[tuple[str, Any]]:
         """
@@ -268,90 +564,36 @@ class ArtworkParser:
         这里不是直接取最终值，而是先把“命中线索”记录下来，
         这样页面结构变化时，更容易排查。
         """
-        next_data = self.extract_next_data()
-        if not next_data:
-            return []
-
-        results: list[tuple[str, Any]] = []
-        target_keys = {
-            "pageCount",
-            "illustId",
-            "userId",
-            "userName",
-            "tags",
-            "tag",
-            "urls",
-            "original",
-            "regular",
-            "small",
-            "thumb",
-            "page_count",
-        }
-        self._walk_find_keys(next_data, target_keys, results)
-        return results
+        snapshot = self._get_snapshot()
+        hits = snapshot.get("next_data_hits", [])
+        return list(hits) if isinstance(hits, list) else []
 
     def extract_preloaded_state_hits(self) -> list[tuple[str, Any]]:
         """
         在 `serverSerializedPreloadedState` 中查找关键字段。
         """
-        preloaded_state = self.extract_server_preloaded_state()
-        if not preloaded_state:
-            return []
-
-        results: list[tuple[str, Any]] = []
-        target_keys = {
-            "pageCount",
-            "illustId",
-            "userId",
-            "userName",
-            "tags",
-            "tag",
-            "urls",
-            "original",
-            "regular",
-            "small",
-            "thumb",
-            "page_count",
-        }
-        self._walk_find_keys(preloaded_state, target_keys, results)
-        return results
+        snapshot = self._get_snapshot()
+        hits = snapshot.get("preloaded_state_hits", [])
+        return list(hits) if isinstance(hits, list) else []
 
     def extract_tags(self) -> list[str]:
         """
-        从作品描述里提取标签。
+        提取作品标签。
 
-        当前策略比较务实：
-        - 先拿 `description`
-        - 再从日文引号 `「xxx」` 中找词
-        - 然后过滤掉链接、FANBOX 文案和明显噪声
+        优先级：
+        1. 结构化数据里的 tag
+        2. 页面 footer 里的原始 tag DOM
+        3. description 文本兜底
         """
-        tags: list[str] = []
+        structured_tags = self._extract_tags_from_structured_hits()
+        if structured_tags:
+            return structured_tags
 
-        description = self.extract_description()
-        quoted_tags = re.findall(r'「(.*?)」', description)
+        dom_tags = self._extract_tags_from_footer_dom()
+        if dom_tags:
+            return dom_tags
 
-        for tag in quoted_tags:
-            tag = tag.strip()
-            if not tag:
-                continue
-
-            # 明显是链接的内容，不当作标签。
-            if tag.startswith("http://") or tag.startswith("https://"):
-                continue
-
-            # FANBOX 推广信息通常不是真正作品标签。
-            if "fanbox" in tag.lower():
-                continue
-
-            # 太长的文本大概率不是标签。
-            if len(tag) > 40:
-                continue
-
-            # 去重，避免返回重复标签。
-            if tag not in tags:
-                tags.append(tag)
-
-        return tags
+        return self._extract_tags_from_description()
 
     def extract_page_count(self) -> int:
         """
@@ -383,14 +625,16 @@ class ArtworkParser:
         if value.isdigit():
             return int(value)
 
-        artwork_id = self.extract_artwork_id()
+        snapshot = self._get_snapshot()
+        artwork_id = str(snapshot.get("artwork_id", ""))
         if artwork_id:
             # 如果页面里出现了 `作品ID_p0 / p1 / p2` 这样的 URL，
             # 那么最大页码 + 1 就可以当作总页数。
-            page_indexes = {
-                int(index)
-                for index in re.findall(rf"{re.escape(artwork_id)}_p(\d+)", self.html, re.I)
-            }
+            page_indexes = set()
+            for url in self.extract_possible_image_urls():
+                match = re.search(r"_p(\d+)", url)
+                if match:
+                    page_indexes.add(int(match.group(1)))
             if page_indexes:
                 return max(page_indexes) + 1
 
@@ -400,7 +644,7 @@ class ArtworkParser:
                 rf'https://i-cf\.pximg\.net[^"\']*{re.escape(artwork_id)}_p0[^"\']*',
                 rf'https://embed\.pixiv\.net/artwork\.php\?illust_id={re.escape(artwork_id)}[^"\']*',
             ]
-            if any(re.search(pattern, self.html, re.I) for pattern in main_image_patterns):
+            if any(re.search(pattern, url, re.I) for pattern in main_image_patterns for url in self.extract_possible_image_urls()):
                 return 1
 
         return 0
@@ -414,56 +658,9 @@ class ArtworkParser:
         - 过滤特别小的缩略图
         - 去重
         """
-        artwork_id = self.extract_artwork_id()
-        patterns: list[str] = []
-
-        if artwork_id:
-            # 如果已经知道作品 ID，就尽量只抓和这个作品相关的图片地址。
-            escaped_artwork_id = re.escape(artwork_id)
-            patterns.extend(
-                [
-                    rf'https://i\.pximg\.net[^\s"\']*{escaped_artwork_id}_p\d+[^\s"\']*',
-                    rf'https://i-cf\.pximg\.net[^\s"\']*{escaped_artwork_id}_p\d+[^\s"\']*',
-                    rf'https://embed\.pixiv\.net/artwork\.php\?illust_id={escaped_artwork_id}[^\s"\']*',
-                    rf'https://[^"\']*pixiv\.net/artwork\.php\?illust_id={escaped_artwork_id}[^\s"\']*',
-                ]
-            )
-        else:
-            # 如果作品 ID 都没提出来，就只能更宽松地全局扫描可能图片地址。
-            patterns.extend(
-                [
-                    r'https://i\.pximg\.net[^\s"\']+',
-                    r'https://i-cf\.pximg\.net[^\s"\']+',
-                    r'https://embed\.pixiv\.net[^\s"\']+',
-                    r'https://[^"\']*pximg\.net[^"\']+',
-                    r'https://[^"\']*pixiv\.net/artwork\.php[^"\']+',
-                ]
-            )
-
-        results: list[str] = []
-
-        for pattern in patterns:
-            matches = re.findall(pattern, self.html, re.I | re.S)
-            for url in matches:
-                # 把 HTML / JSON 里的转义 URL 恢复成正常 URL。
-                url = unescape(url.replace("\\/", "/").replace("\\u0026", "&")).rstrip("\\").strip()
-
-                if not url:
-                    continue
-
-                # 头像图片不是作品图，过滤掉。
-                if "/user-profile/" in url:
-                    continue
-
-                # 一些很小的头像缩略图会以 `_50` / `_170` 结尾，也过滤掉。
-                if re.search(r'_(50|170)\.(jpg|jpeg|png|webp)$', url, re.I):
-                    continue
-
-                # 去重，避免后面下载器拿到一堆重复地址。
-                if url not in results:
-                    results.append(url)
-
-        return results
+        snapshot = self._get_snapshot()
+        urls = snapshot.get("possible_image_urls", [])
+        return list(urls) if isinstance(urls, list) else []
 
     def extract_user_id(self) -> str:
         """
@@ -474,11 +671,21 @@ class ArtworkParser:
 
         所以这里优先找“作者区域附近”的用户 ID 线索。
         """
+        snapshot = self._get_snapshot()
+        structured_user_id = self._find_first_value_by_keys(
+            snapshot.get("preloaded_state", {}),
+            {"authorId"},
+        ) or self._find_first_value_by_keys(
+            snapshot.get("next_data", {}),
+            {"authorId"},
+        )
+        if structured_user_id and structured_user_id.isdigit():
+            return structured_user_id
+
         author_patterns = [
             r'data-gtm-user-id="(\d+)"\s+data-click-action="click"\s+data-click-label="follow"',
             r'href="/users/(\d+)/artworks"[^>]*>查看作品目录',
             r'<a[^>]+data-gtm-value="(\d+)"[^>]+href="/users/\1"',
-            r'"authorId":"?(\d+)"?',
         ]
 
         user_id = self._extract_first_match(author_patterns, flags=re.I | re.S)
@@ -506,7 +713,8 @@ class ArtworkParser:
         这样外部调用时只需要调用这一个方法，
         就能拿到统一格式的完整结果。
         """
-        next_data = self.extract_next_data()
+        snapshot = self._get_snapshot()
+        next_data = snapshot.get("next_data", {})
         next_data_hits = self.extract_next_data_hits() + self.extract_preloaded_state_hits()
 
         # 这里相当于把“网页原始信息”整理成“项目内部标准数据结构”。

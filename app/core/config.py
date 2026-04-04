@@ -56,6 +56,14 @@ class Settings(BaseSettings):
     # 30000 毫秒 = 30 秒。
     timeout: int = 30000
 
+    # 是否把调试用的 HTML / JSON 快照保存到 `data/temp`。
+    # 关闭后，常规批量抓取时不会再持续写入大量调试文件。
+    save_debug_artifacts: bool = True
+
+    # 是否打印更详细的解析调试信息。
+    # 关闭后，终端输出会更适合长期批量运行。
+    verbose_debug_output: bool = True
+
     # 图片下载目录。
     download_dir: str = "./data/images"
 

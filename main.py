@@ -17,10 +17,12 @@
 
 from app.browser.client import BrowserClient
 from app.browser.login import PixivLoginService
+from app.core.logging_config import configure_logging, get_logger
 from app.crawler.author_crawler import AuthorCrawler
 from app.crawler.artwork_crawler import ArtworkCrawler
 from app.db.download_record_repository import DownloadRecordRepository
 from app.downloader.image_downloader import PixivImageDownloader
+from app.services import console_service
 from app.services.cli_service import (
     AuthorCollectOptions,
     archive_old_records,
@@ -33,11 +35,22 @@ from app.services.cli_service import (
     show_history,
 )
 from app.services.task_service import (
-    print_incremental_selection_summary,
-    print_batch_summary,
     process_artwork_batch,
     select_incremental_artwork_ids,
 )
+
+logger = get_logger(__name__)
+
+
+def action_requires_direct_artwork_input(action: str) -> bool:
+    """
+    判断当前动作是否需要“手动输入作品 ID”。
+
+    现在会自己去收集作品来源的模式有：
+    - `crawl_author`：先从作者主页拿作品列表
+    - `crawl_following`：先从关注画师列表里拿作者，再继续增量更新
+    """
+    return action not in {"crawl_author", "crawl_following"}
 
 
 def main() -> None:
@@ -52,6 +65,7 @@ def main() -> None:
     换句话说，这里尽量只做“安排工作”，
     不做太多具体实现细节。
     """
+    configure_logging()
     client = BrowserClient()
     record_repository = DownloadRecordRepository()
 
@@ -81,8 +95,10 @@ def main() -> None:
         elif action == "crawl_author":
             author_request = collect_author_options()
             artwork_ids = []
-        else:
+        elif action_requires_direct_artwork_input(action):
             artwork_ids = collect_artwork_ids()
+        else:
+            artwork_ids = []
 
         # 到这里说明本次真的需要访问网站，
         # 所以才启动浏览器。
@@ -94,17 +110,24 @@ def main() -> None:
         # 复用失败时，再删除旧状态并重新登录。
         if client.state_manager.state_exists():
             if login_service.is_logged_in():
-                print("检测到已有可用登录状态，无需重新登录。")
+                logger.info("检测到已有可用登录状态，无需重新登录。")
             else:
-                print("已有登录状态失效，准备重新登录。")
+                logger.warning("已有登录状态失效，准备重新登录。")
                 client.state_manager.delete_state()
-                login_service.login_and_save_state()
+                login_result = login_service.login_and_save_state()
+                if not login_result["success"]:
+                    logger.error("登录未完成，程序结束。")
+                    return
         else:
-            print("未检测到登录状态，准备首次登录。")
-            login_service.login_and_save_state()
+            logger.info("未检测到登录状态，准备首次登录。")
+            login_result = login_service.login_and_save_state()
+            if not login_result["success"]:
+                logger.error("登录未完成，程序结束。")
+                return
 
         crawler = ArtworkCrawler(client)
         downloader = PixivImageDownloader(client)
+        author_crawler = AuthorCrawler(client)
 
         if action == "crawl_author":
             # 对人来说，这里前面已经在 `crawl_author` 分支里赋过值了。
@@ -115,13 +138,12 @@ def main() -> None:
 
             user_id = author_request["user_id"]
             limit = author_request["limit"]
-            author_crawler = AuthorCrawler(client)
             author_artwork_ids = author_crawler.collect_author_artwork_ids(user_id, limit=limit)
             if not author_artwork_ids:
-                print(f"未从作者 {user_id} 的主页里识别到作品 ID。")
+                logger.warning("未从作者 %s 的主页里识别到作品 ID。", user_id)
                 return
 
-            print(f"已从作者 {user_id} 主页识别到 {len(author_artwork_ids)} 个作品。")
+            logger.info("已从作者 %s 主页识别到 %s 个作品。", user_id, len(author_artwork_ids))
 
             if author_request["update_mode"] == "incremental":
                 selection = select_incremental_artwork_ids(
@@ -130,16 +152,91 @@ def main() -> None:
                     completed_streak_limit=author_request["completed_streak_limit"],
                 )
                 artwork_ids = selection["candidate_artwork_ids"]
-                print_incremental_selection_summary(selection)
+                console_service.show_incremental_selection_summary(selection)
 
                 if not artwork_ids:
-                    print("这位作者当前没有需要增量处理的新作品。")
+                    logger.info("这位作者当前没有需要增量处理的新作品。")
                     return
             else:
                 artwork_ids = author_artwork_ids
-                print("当前使用全量模式，会按识别到的作品列表逐个处理。")
+                logger.info("当前使用全量模式，会按识别到的作品列表逐个处理。")
 
-        print(f"本次共识别到 {len(artwork_ids)} 个作品 ID：{artwork_ids}")
+        if action == "crawl_following":
+            # 这里的目标不是抓“一个作者”，
+            # 而是先把“我当前关注的所有作者”收集出来，
+            # 再逐个复用现有的作者增量更新流程。
+            followed_user_ids = author_crawler.collect_following_user_ids()
+            if not followed_user_ids:
+                logger.info("当前没有识别到任何已关注画师。")
+                return
+
+            logger.info("本次共识别到 %s 个关注画师。", len(followed_user_ids))
+            logger.debug("关注画师 ID 列表：%s", followed_user_ids)
+
+            total_success_results = []
+            total_failed_results = []
+            updated_authors: list[str] = []
+            skipped_authors: list[str] = []
+            failed_authors: list[tuple[str, str]] = []
+
+            for index, user_id in enumerate(followed_user_ids, start=1):
+                logger.debug(
+                    "========== 开始处理第 %s/%s 个关注画师：%s ==========",
+                    index,
+                    len(followed_user_ids),
+                    user_id,
+                )
+
+                try:
+                    author_artwork_ids = author_crawler.collect_author_artwork_ids(user_id)
+                    if not author_artwork_ids:
+                        logger.debug("作者 %s 当前没有识别到可处理作品，先跳过。", user_id)
+                        skipped_authors.append(user_id)
+                        continue
+
+                    selection = select_incremental_artwork_ids(
+                        author_artwork_ids,
+                        record_repository,
+                        completed_streak_limit=10,
+                    )
+                    console_service.show_incremental_selection_summary(selection)
+
+                    artwork_ids = selection["candidate_artwork_ids"]
+                    if not artwork_ids:
+                        logger.debug("作者 %s 当前没有需要增量处理的新作品。", user_id)
+                        skipped_authors.append(user_id)
+                        continue
+
+                    summary = process_artwork_batch(
+                        artwork_ids=artwork_ids,
+                        crawler=crawler,
+                        downloader=downloader,
+                        record_repository=record_repository,
+                    )
+                    console_service.show_batch_summary(summary)
+
+                    total_success_results.extend(summary["success_results"])
+                    total_failed_results.extend(summary["failed_results"])
+                    updated_authors.append(user_id)
+                except Exception as exc:
+                    error_message = str(exc)
+                    failed_authors.append((user_id, error_message))
+                    logger.warning("作者 %s 处理失败：%s", user_id, error_message)
+
+            console_service.show_following_update_summary(
+                followed_user_ids=followed_user_ids,
+                updated_authors=updated_authors,
+                skipped_authors=skipped_authors,
+                failed_authors=failed_authors,
+                total_success_results=total_success_results,
+                total_failed_results=total_failed_results,
+            )
+
+            console_service.pause_before_exit()
+            return
+
+        logger.info("本次共识别到 %s 个作品 ID。", len(artwork_ids))
+        logger.debug("本次作品 ID 列表：%s", artwork_ids)
 
         summary = process_artwork_batch(
             artwork_ids=artwork_ids,
@@ -147,10 +244,10 @@ def main() -> None:
             downloader=downloader,
             record_repository=record_repository,
         )
-        print_batch_summary(summary)
+        console_service.show_batch_summary(summary)
 
         # 留一点时间给你人工确认结果。
-        input("按回车键关闭浏览器...")
+        console_service.pause_before_exit()
     finally:
         # 不管中间有没有报错，最后都要把浏览器关掉。
         # 这样可以避免后台残留浏览器进程。

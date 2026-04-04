@@ -10,10 +10,24 @@
 而是“自动优先，必要时人工兜底”。
 """
 
+from typing import TypedDict
+
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from app.browser.client import BrowserClient
 from app.core.config import settings
+from app.core.logging_config import get_logger
+from app.services import console_service
+
+
+logger = get_logger(__name__)
+
+
+class LoginResult(TypedDict):
+    success: bool
+    requires_manual_action: bool
+    state_saved: bool
+    issue: str
 
 
 class PixivLoginService:
@@ -54,6 +68,21 @@ class PixivLoginService:
         记录当前登录阶段遇到的主要问题。
         """
         self.last_login_issue = issue
+
+    def _build_result(
+        self,
+        *,
+        success: bool,
+        issue: str = "",
+        requires_manual_action: bool = False,
+        state_saved: bool = False,
+    ) -> LoginResult:
+        return {
+            "success": success,
+            "requires_manual_action": requires_manual_action,
+            "state_saved": state_saved,
+            "issue": issue,
+        }
 
     def open_login_page(self) -> None:
         """
@@ -99,10 +128,14 @@ class PixivLoginService:
         检查当前页面是否出现了 reCAPTCHA 提示。
         """
         page = self.client.get_page()
-        body_text = page.locator("body").inner_text()
+        try:
+            body_text = page.locator("body").inner_text()
+        except Exception:
+            logger.debug("读取登录页 body 文本失败，暂时无法判断是否出现 reCAPTCHA 提示。", exc_info=True)
+            return False
         return any(hint in body_text for hint in self.RECAPTCHA_HINTS)
 
-    def _fill_login_form(self) -> bool:
+    def _fill_login_form(self) -> LoginResult:
         """
         自动填写账号密码，并确认提交按钮是否可点。
 
@@ -112,8 +145,7 @@ class PixivLoginService:
         """
         if not self._credentials_ready():
             self._set_login_issue("missing_credentials")
-            print("未检测到 Pixiv 账号或密码，无法执行自动登录。")
-            return False
+            return self._build_result(success=False, issue="missing_credentials")
 
         page = self.client.get_page()
         try:
@@ -121,8 +153,7 @@ class PixivLoginService:
             page.locator(self.PASSWORD_SELECTOR).first.wait_for(timeout=30000)
         except PlaywrightTimeoutError:
             self._set_login_issue("login_form_not_found")
-            print("登录表单未按预期出现，当前页面可能不是标准登录页。")
-            return False
+            return self._build_result(success=False, issue="login_form_not_found")
 
         form = self._get_login_form()
 
@@ -147,38 +178,43 @@ class PixivLoginService:
 
         if submit_button.is_disabled():
             self._set_login_issue("submit_disabled")
-            print("自动填写后登录按钮仍不可点击，暂时无法继续自动登录。")
-            return False
+            return self._build_result(success=False, issue="submit_disabled")
 
-        return True
+        return self._build_result(success=True)
 
     def _print_manual_login_guide(self) -> None:
         """
         根据当前失败原因，打印更具体的人工处理提示。
         """
         if self.last_login_issue == "recaptcha":
-            print("检测到 Pixiv 要求进行 reCAPTCHA 验证。")
-            print("请在浏览器中手动完成验证码；如果验证完成后页面没有自动跳转，请再点一次“ログイン”。")
+            console_service.show_warning("检测到 Pixiv 要求进行 reCAPTCHA 验证。")
+            console_service.show_warning(
+                "请在浏览器中手动完成验证码；如果验证完成后页面没有自动跳转，请再点一次“ログイン”。"
+            )
             return
 
         if self.last_login_issue == "missing_credentials":
-            print("当前没有可用于自动登录的账号密码。")
-            print("请在浏览器中手动输入账号密码并完成登录。")
+            console_service.show_warning("当前没有可用于自动登录的账号密码。")
+            console_service.show_warning("请在浏览器中手动输入账号密码并完成登录。")
             return
 
         if self.last_login_issue == "login_form_not_found":
-            print("当前页面没有按预期显示标准登录表单。")
-            print("请观察浏览器页面，如果出现了其他验证页或中间页，请手动完成后继续。")
+            console_service.show_warning("当前页面没有按预期显示标准登录表单。")
+            console_service.show_warning(
+                "请观察浏览器页面，如果出现了其他验证页或中间页，请手动完成后继续。"
+            )
             return
 
         if self.last_login_issue == "submit_disabled":
-            print("自动填表后登录按钮仍不可点击。")
-            print("请检查浏览器页面里是否还有额外选项、弹窗或验证步骤需要手动处理。")
+            console_service.show_warning("自动填表后登录按钮仍不可点击。")
+            console_service.show_warning(
+                "请检查浏览器页面里是否还有额外选项、弹窗或验证步骤需要手动处理。"
+            )
             return
 
-        print("请在浏览器中手动完成 Pixiv 登录。")
+        console_service.show_warning("请在浏览器中手动完成 Pixiv 登录。")
 
-    def wait_for_manual_login(self, timeout: int = 180000) -> bool:
+    def wait_for_manual_login(self, timeout: int = 180000) -> LoginResult:
         """
         等待用户手动完成登录。
 
@@ -188,22 +224,29 @@ class PixivLoginService:
 
         # 先检查一次，避免其实已经登录成功，但这里只是还没来得及返回。
         if self.is_logged_in():
-            print("当前已经处于登录状态，无需继续人工操作。")
-            return True
+            console_service.show_success("当前已经处于登录状态，无需继续人工操作。")
+            return self._build_result(success=True, requires_manual_action=True)
 
         self._print_manual_login_guide()
-        print("程序会继续等待页面跳转到 Pixiv 主站...")
+        console_service.show_warning("程序会继续等待页面跳转到 Pixiv 主站...")
 
         try:
             page.wait_for_url("https://www.pixiv.net/*", timeout=timeout)
-            print("检测到页面已跳转到 Pixiv 主站。")
+            console_service.show_success("检测到页面已跳转到 Pixiv 主站。")
         except PlaywrightTimeoutError:
-            print("等待登录超时，请确认是否已经成功登录。")
-            return False
+            return self._build_result(
+                success=False,
+                issue="manual_login_timeout",
+                requires_manual_action=True,
+            )
 
-        return self.is_logged_in()
+        return self._build_result(
+            success=self.is_logged_in(),
+            requires_manual_action=True,
+            issue="" if self.is_logged_in() else "unknown",
+        )
 
-    def login_automatically(self, timeout: int = 180000) -> bool:
+    def login_automatically(self, timeout: int = 180000) -> LoginResult:
         """
         尝试执行自动登录。
 
@@ -224,24 +267,23 @@ class PixivLoginService:
         # 如果访问登录页后直接被重定向回 Pixiv 主站，
         # 说明当前上下文其实已经是登录状态了。
         if "accounts.pixiv.net" not in page.url and "pixiv.net" in page.url:
-            print("当前浏览器上下文已处于登录状态，无需再次自动登录。")
-            return True
+            return self._build_result(success=True)
 
         self._dismiss_cookie_banner()
 
-        if not self._fill_login_form():
-            return False
+        fill_result = self._fill_login_form()
+        if not fill_result["success"]:
+            return fill_result
 
         form = self._get_login_form()
         submit_button = form.get_by_role("button", name="ログイン", exact=True)
 
-        print("已自动填写账号密码，正在尝试自动登录...")
+        console_service.show_warning("已自动填写账号密码，正在尝试自动登录...")
         submit_button.click()
 
         try:
             page.wait_for_url("https://www.pixiv.net/*", timeout=timeout)
-            print("自动登录成功，已跳转到 Pixiv 主站。")
-            return self.is_logged_in()
+            return self._build_result(success=self.is_logged_in())
         except PlaywrightTimeoutError:
             # 没在规定时间内跳过去，不一定就是密码错。
             # 也可能是触发了 reCAPTCHA、二次验证、风控等额外流程。
@@ -249,16 +291,17 @@ class PixivLoginService:
 
         if self._has_recaptcha_prompt():
             self._set_login_issue("recaptcha")
-            print("Pixiv 要求进行 reCAPTCHA 验证，自动登录被拦截。")
-            return False
+            return self._build_result(
+                success=False,
+                issue="recaptcha",
+                requires_manual_action=True,
+            )
 
         if self.is_logged_in():
-            print("自动登录成功。")
-            return True
+            return self._build_result(success=True)
 
         self._set_login_issue("unknown")
-        print("自动登录未成功，请检查账号密码或页面提示。")
-        return False
+        return self._build_result(success=False, issue="unknown")
 
     def is_logged_in(self) -> bool:
         """
@@ -269,7 +312,7 @@ class PixivLoginService:
         try:
             page.goto(self.HOME_URL, wait_until="domcontentloaded")
         except Exception as e:
-            print(f"访问 Pixiv 首页失败：{e}")
+            logger.warning("访问 Pixiv 首页失败：%s", e)
             return False
 
         current_url = page.url
@@ -282,14 +325,15 @@ class PixivLoginService:
 
         return False
 
-    def save_login_state(self) -> None:
+    def save_login_state(self) -> LoginResult:
         """
         保存当前登录状态到本地文件。
         """
         self.client.save_storage_state()
-        print("登录状态已保存。")
+        console_service.show_success("登录状态已保存。")
+        return self._build_result(success=True, state_saved=True)
 
-    def login_and_save_state(self, timeout: int = 180000) -> bool:
+    def login_and_save_state(self, timeout: int = 180000) -> LoginResult:
         """
         执行“登录并保存状态”的完整流程。
 
@@ -299,25 +343,33 @@ class PixivLoginService:
           就允许用户在浏览器里手动补完成验证
         - 最后再保存登录状态
         """
-        if self.login_automatically(timeout=timeout):
-            self.save_login_state()
-            print("Pixiv 自动登录成功。")
-            return True
+        auto_result = self.login_automatically(timeout=timeout)
+        if auto_result["success"]:
+            saved_result = self.save_login_state()
+            console_service.show_success("Pixiv 自动登录成功。")
+            return self._build_result(success=True, state_saved=saved_result["state_saved"])
 
         # 如果当前是无头模式，看不到浏览器界面，
         # 那么人工补验证码也没有意义，所以直接返回失败。
         if settings.headless:
-            print("当前处于无头模式，无法人工补充验证码或二次验证。")
-            if self.last_login_issue == "recaptcha":
-                print("这次失败的直接原因是 reCAPTCHA；请把 HEADLESS 设为 false 后，在可见浏览器里完成人工验证。")
-            print("如果 Pixiv 触发了 reCAPTCHA，请把 HEADLESS 设为 false 后重试。")
-            return False
+            console_service.show_error("当前处于无头模式，无法人工补充验证码或二次验证。")
+            if auto_result["issue"] == "recaptcha":
+                console_service.show_error(
+                    "这次失败的直接原因是 reCAPTCHA；请把 HEADLESS 设为 false 后，在可见浏览器里完成人工验证。"
+                )
+            console_service.show_error("如果 Pixiv 触发了 reCAPTCHA，请把 HEADLESS 设为 false 后重试。")
+            return self._build_result(success=False, issue="headless_manual_required")
 
-        print("自动登录未完成，准备切换为人工补充验证。")
-        if not self.wait_for_manual_login(timeout=timeout):
-            print("登录失败，未保存登录状态。")
-            return False
+        console_service.show_warning("自动登录未完成，准备切换为人工补充验证。")
+        manual_result = self.wait_for_manual_login(timeout=timeout)
+        if not manual_result["success"]:
+            console_service.show_error("登录失败，未保存登录状态。")
+            return manual_result
 
-        self.save_login_state()
-        print("Pixiv 登录成功。")
-        return True
+        saved_result = self.save_login_state()
+        console_service.show_success("Pixiv 登录成功。")
+        return self._build_result(
+            success=True,
+            requires_manual_action=True,
+            state_saved=saved_result["state_saved"],
+        )

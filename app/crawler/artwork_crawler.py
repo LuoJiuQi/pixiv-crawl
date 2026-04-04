@@ -20,7 +20,11 @@ from typing import Any
 from playwright.sync_api import Error as PlaywrightError, TimeoutError as PlaywrightTimeoutError
 
 from app.browser.client import BrowserClient
+from app.core.logging_config import get_logger
 from app.utils.file_formatters import pretty_html_text, pretty_json_text
+
+
+logger = get_logger(__name__)
 
 
 class ArtworkCrawler:
@@ -48,9 +52,10 @@ class ArtworkCrawler:
         try:
             # 尝试打开作品页。
             page.goto(url, wait_until="domcontentloaded", timeout=30000)
-        except PlaywrightError:
+        except PlaywrightError as exc:
             # 某些前端页面在加载过程中会触发额外跳转或瞬时异常。
             # 所以这里先不直接失败，后面继续检查最终 URL。
+            logger.warning("作品页首次跳转失败，继续检查最终 URL：%s; reason=%r", url, exc, exc_info=True)
             pass
 
         current_url = page.url
@@ -80,6 +85,7 @@ class ArtworkCrawler:
         except PlaywrightTimeoutError:
             # 即使等不到，也不急着失败。
             # 很多时候 HTML 里依然已经有足够信息给解析器使用。
+            logger.debug("等待作品页 metadata 节点超时，继续兜底：%s", artwork_id)
             pass
 
         # 再额外等一下作品主图相关节点。
@@ -100,6 +106,7 @@ class ArtworkCrawler:
         except PlaywrightTimeoutError:
             # 如果仍然等不到，也先不报错。
             # 下载器后面还有一层“从当前页面实时补抓图片 URL”的兜底逻辑。
+            logger.debug("等待作品页主图节点超时，继续兜底：%s", artwork_id)
             pass
 
         return page.url

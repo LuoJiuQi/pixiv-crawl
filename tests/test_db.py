@@ -1,7 +1,9 @@
 import unittest
+from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import cast
 
-from app.db.download_record_repository import DownloadRecordRepository
+from app.db.download_record_repository import DownloadRecord, DownloadRecordRepository
 
 
 class DownloadRecordRepositoryTestCase(unittest.TestCase):
@@ -26,6 +28,7 @@ class DownloadRecordRepositoryTestCase(unittest.TestCase):
             record = repository.get_record("142463788")
 
         self.assertIsNotNone(record)
+        record = cast(DownloadRecord, record)
         self.assertEqual(record["status"], "completed")
         self.assertEqual(record["error_type"], "")
         self.assertEqual(record["title"], "ヤチいろ")
@@ -134,6 +137,43 @@ class DownloadRecordRepositoryTestCase(unittest.TestCase):
         self.assertEqual(deleted_count, 1)
         self.assertIsNone(remaining_100)
         self.assertIsNotNone(remaining_200)
+
+    def test_mark_failed_preserves_existing_metadata(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repository = DownloadRecordRepository(f"{temp_dir}/pixiv.db")
+            repository.initialize()
+
+            downloaded_file = Path(temp_dir) / "artwork_100_p0.jpg"
+            downloaded_file.write_bytes(b"image")
+
+            repository.upsert_record(
+                "100",
+                status="completed",
+                error_type="",
+                title="A",
+                author_name="Author",
+                page_count=1,
+                download_count=1,
+                saved_html="./data/temp/html/artwork_100.html",
+                saved_json="./data/temp/json/artwork_100.json",
+                downloaded_files=[str(downloaded_file)],
+            )
+
+            repository.mark_failed("100", error_type="timeout", error_message="timeout")
+            record = repository.get_record("100")
+
+        self.assertIsNotNone(record)
+        record = cast(DownloadRecord, record)
+        self.assertEqual(record["status"], "failed")
+        self.assertEqual(record["error_type"], "timeout")
+        self.assertEqual(record["error_message"], "timeout")
+        self.assertEqual(record["title"], "A")
+        self.assertEqual(record["author_name"], "Author")
+        self.assertEqual(record["page_count"], 1)
+        self.assertEqual(record["download_count"], 1)
+        self.assertEqual(record["saved_html"], "./data/temp/html/artwork_100.html")
+        self.assertEqual(record["saved_json"], "./data/temp/json/artwork_100.json")
+        self.assertEqual(record["downloaded_files"], [str(downloaded_file)])
 
 
 if __name__ == "__main__":

@@ -1,6 +1,104 @@
 # pixiv-crawl
 
-一个基于 Playwright 的 Pixiv 爬虫项目，当前已经支持：
+<p align="center">一个基于 Playwright 的 Pixiv 批量抓取工具，支持登录态复用、批量作品抓取、作者增量更新、失败重试和 SQLite 记录。</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white" alt="Python 3.12+" />
+  <img src="https://img.shields.io/badge/Playwright-1.58-2EAD33?logo=playwright&logoColor=white" alt="Playwright" />
+  <img src="https://img.shields.io/badge/HTTP-httpx-0F172A" alt="httpx" />
+  <img src="https://img.shields.io/badge/Storage-SQLite-003B57?logo=sqlite&logoColor=white" alt="SQLite" />
+  <img src="https://img.shields.io/badge/Container-Docker-2496ED?logo=docker&logoColor=white" alt="Docker" />
+  <img src="https://img.shields.io/badge/Status-Actively%20Maintained-2EA44F" alt="Maintained" />
+</p>
+
+<p align="center">
+  <a href="#-快速开始">快速开始</a> ·
+  <a href="#-运行模式">运行模式</a> ·
+  <a href="#-核心能力">核心能力</a> ·
+  <a href="#-项目结构">项目结构</a> ·
+  <a href="#-测试">测试</a>
+</p>
+
+## ✨ 项目定位
+
+这个项目更像一个「可持续运行」的 Pixiv 下载工具，而不只是一次性的抓图脚本。
+
+它适合用来做这些事情：
+
+- 批量抓取作品 ID 或作品链接
+- 按作者抓取全部作品，或只增量更新新作品
+- 按关注列表批量更新画师作品
+- 对失败任务做重试、导出和归档
+- 保留本地历史记录，避免重复下载
+
+它目前不追求的方向：
+
+- 官方 API 驱动的大规模数据采集
+- 分布式爬虫或高并发抓取平台
+- 绕过 Pixiv 登录限制的非浏览器方案
+
+## 🚀 快速开始
+
+### 1. 准备环境
+
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+playwright install chromium
+```
+
+### 2. 准备配置
+
+把 [`.env.example`](./.env.example) 复制为 `.env`，至少填写：
+
+```env
+PIXIV_USERNAME=
+PIXIV_PASSWORD=
+HEADLESS=false
+```
+
+如果你的网络环境需要代理，再补：
+
+```env
+PROXY_SERVER=http://127.0.0.1:7890
+PROXY_USERNAME=
+PROXY_PASSWORD=
+```
+
+日常使用建议保持：
+
+```env
+SAVE_DEBUG_ARTIFACTS=false
+VERBOSE_DEBUG_OUTPUT=false
+```
+
+需要排查页面解析或下载异常时，再临时打开这两个开关。
+
+### 3. 启动项目
+
+```powershell
+python main.py
+```
+
+首次运行建议使用 `HEADLESS=false`，这样遇到 `reCAPTCHA` 时可以手动补验证并保存登录态。
+
+## 📦 运行模式
+
+| 模式 | 说明 |
+| --- | --- |
+| `1` | 批量抓取作品 |
+| `2` | 查看历史记录 |
+| `3` | 重试失败任务 |
+| `4` | 导出失败清单 |
+| `5` | 归档并清理旧记录 |
+| `6` | 按作者批量抓取作品 |
+| `7` | 按关注列表更新画师 |
+
+## 🧩 核心能力
+
+### 抓取能力
 
 - 自动登录与登录态复用
 - 单作品抓取与解析
@@ -8,165 +106,106 @@
 - 批量输入作品 ID / 作品链接
 - 按作者批量抓取作品
 - 按作者增量更新作品
-- SQLite 任务记录
-- 失败任务重试
-- 失败清单导出
-- 旧记录归档与清理
-- Docker 运行支持
+- 按关注列表批量更新画师作品
 
-## 当前能力
+### 稳定性增强
 
-- 作品页抓取：打开作品详情页，保存 HTML 和解析结果 JSON
-- 作者页抓取：打开作者页并提取作者名下作品 ID
-- 作品解析：提取标题、作者、标签、页数、候选图片地址等信息
-- 图片下载：复用当前浏览器 cookies 下载原图，并支持多图作品
-- 图片命名：按“一个作者一个文件夹，作品标题 + 作品 ID”保存图片
-- 批量任务：批量处理多个作品，单个失败不会中断后续任务
-- 增量更新：作者模式下只处理新作品和失败作品
-- 数据库记录：记录成功 / 失败 / 错误类型 / 下载文件等信息
-- 历史管理：查看记录、按失败类型筛选、重试失败任务、导出失败清单、归档旧记录
+- 登录失败明确退出，不再继续误跑后续流程
+- 已完成记录会校验本地文件，缺失时自动重跑
+- 失败重试不会清空已有标题、作者、下载文件等历史元数据
+- 解析器优先识别当前页真实作品 ID，避免被相关推荐作品串号
+- 下载器支持流式写盘，降低大图下载的内存占用
+- 页面抓取、作者抓取、下载兜底路径带分层诊断日志
 
-## 环境准备
+### 任务管理
 
-1. 创建虚拟环境
+- SQLite 记录成功 / 失败 / 错误类型 / 下载文件
+- 查看历史记录
+- 按失败类型筛选和重试
+- 导出失败清单
+- 归档旧记录
+
+## 🔄 工作流
+
+```mermaid
+flowchart LR
+    A["选择运行模式"] --> B["启动浏览器并复用登录态"]
+    B --> C["抓取作品页 / 作者页 / 关注列表"]
+    C --> D["解析为 ArtworkInfo"]
+    D --> E["规划下载并保存图片"]
+    E --> F["写入 SQLite 记录"]
+```
+
+## 🗂 项目结构
+
+更完整的目录说明见 [项目结构.md](./项目结构.md) 和 [项目结构-代码编写.md](./项目结构-代码编写.md)。
+
+当前最重要的模块如下：
+
+- `app/browser`：浏览器启动、登录、登录态管理
+- `app/crawler`：作品页、作者页、关注列表采集
+- `app/parser`：作品信息解析与页面快照提取
+- `app/downloader`：下载规划、路径构建、图片下载
+- `app/db`：SQLite 任务记录
+- `app/services`：CLI、终端展示、批量任务、失败分类、导出
+- `app/core`：配置与日志初始化
+
+## 🧪 测试
+
+当前已经覆盖主流程、登录、解析器、下载器、下载规划、路径规则、数据库、CLI、终端展示、作者抓取等核心链路。
 
 ```powershell
-python -m venv .venv
+python -m unittest tests.test_task_service tests.test_author_crawler tests.test_cli_service tests.test_record_exporter tests.test_failure_exporter tests.test_failure_classifier tests.test_db tests.test_main tests.test_parser tests.test_downloader tests.test_console_service tests.test_login tests.test_artwork_crawler tests.test_download_path_builder tests.test_download_planner -v
 ```
 
-1. 激活虚拟环境
+## 🐳 Docker 运行
 
-```powershell
-.venv\Scripts\Activate.ps1
-```
-
-1. 安装依赖
-
-```powershell
-python -m pip install --upgrade pip
-pip install -r requirements.txt
-playwright install chromium
-```
-
-1. 创建本地配置文件
-
-把 `.env.example` 复制为 `.env`，然后填写自己的 Pixiv 账号密码。
-
-如果你所在网络环境无法直接访问 Pixiv，也可以在 `.env` 里补代理：
-
-```env
-PROXY_SERVER=http://127.0.0.1:7890
-```
-
-支持常见的：
-
-- `http://...`
-- `https://...`
-- `socks5://...`
-
-如果代理需要认证，再补：
-
-```env
-PROXY_USERNAME=
-PROXY_PASSWORD=
-```
-
-## Docker 运行
-
-这个项目已经补好了基础容器化文件：
+项目已经提供：
 
 - [Dockerfile](./Dockerfile)
 - [docker-compose.yml](./docker-compose.yml)
 - [.dockerignore](./.dockerignore)
 
-最推荐的 Docker 使用方式是：
+推荐使用方式：
 
-1. 先在本机完成一次登录，生成登录态文件  
-原因：Pixiv 登录可能会触发 `reCAPTCHA`，而容器里默认是无头模式，人工处理验证码不方便。
-
-1. 确认本地这些文件已经存在
-
-- `.env`
-- `data/state/storage_state.json`
-
-1. 构建镜像
+1. 先在宿主机完成一次登录，生成 `data/state/storage_state.json`
+2. 确认 `.env` 已准备好
+3. 构建镜像
+4. 启动容器
 
 ```powershell
 docker compose build
-```
-
-1. 启动交互式命令行
-
-```powershell
 docker compose run --rm pixiv-crawl
 ```
 
-容器运行时会直接复用你本地挂载进去的：
+容器会直接挂载本地的 `data/` 和 `logs/`，所以数据库、图片和登录态都能保留在宿主机。
 
-- `data/`
-- `logs/`
+## 📝 调试与日志
 
-所以这些数据不会因为容器退出而丢失。
+默认情况下，项目会输出相对克制的终端日志。
 
-### Docker 代理说明
+如果你要排查问题，建议同时打开：
 
-如果在中国内陆运行，需要访问 Pixiv 的代理，直接把 `PROXY_SERVER` 写进 `.env` 即可。  
-项目会自动把同一套代理同时用于：
+- `VERBOSE_DEBUG_OUTPUT=true`
+- `SAVE_DEBUG_ARTIFACTS=true`
 
-- Playwright 浏览器访问 Pixiv
-- `httpx` 下载图片
+调试信息主要看两处：
 
-因为 `docker-compose.yml` 已经通过 `env_file` 读取 `.env`，所以容器里也会自动拿到这套代理配置。
+- 终端里的 `DEBUG` 日志
+- `data/temp/html` 和 `data/temp/json` 下的快照文件
 
-### Docker 注意事项
+## 📁 运行产物说明
 
-- `docker-compose.yml` 里已经把 `HEADLESS` 强制覆盖成 `true`
-- 如果你需要首次人工登录，更建议先在宿主机上跑通一次，再把 `data/state/storage_state.json` 带进容器
-- 当前使用的是 Playwright 官方 Python 镜像 `mcr.microsoft.com/playwright/python:v1.58.0-noble`
+这些目录和文件默认都属于本地产物，不建议提交到仓库：
 
-## 运行方式
+- `data/images`
+- `data/state`
+- `data/exports`
+- `data/temp`
+- `data/*.db`
+- `logs`
 
-```powershell
-python main.py
-```
+## 📚 参考资料
 
-启动后目前支持这些模式：
-
-- `1` 批量抓取作品
-- `2` 查看历史记录
-- `3` 重试失败任务
-- `4` 导出失败清单
-- `5` 归档并清理旧记录
-- `6` 按作者批量抓取作品
-
-## 项目结构
-
-实际结构请看 [项目结构.md](./项目结构.md)。
-
-当前最重要的目录是：
-
-- `app/browser`：浏览器启动、登录、登录态管理
-- `app/crawler`：作品页 / 作者页采集
-- `app/parser`：作品信息解析
-- `app/downloader`：图片下载
-- `app/db`：SQLite 任务记录
-- `app/services`：CLI、批量任务、失败分类、导出等服务
-- `data/temp`：本地临时调试目录
-- `tests`：单元测试
-
-## 测试
-
-```powershell
-python -m unittest tests.test_task_service tests.test_author_crawler tests.test_cli_service tests.test_record_exporter tests.test_failure_exporter tests.test_failure_classifier tests.test_db tests.test_main tests.test_parser tests.test_downloader -v
-```
-
-## 说明
-
-- `data/temp` 里的 HTML / JSON 主要用于本地调试，当前已加入 `.gitignore`
-- `data/images`、`data/state`、`data/exports`、`data/*.db` 属于运行产物，默认已加入 `.gitignore`
-- 当前项目仍以网页抓取链路为主，尚未接入 `pixivpy3`
-
-## 参考资料
-
-- Playwright 官方 Docker 说明：<https://playwright.dev/python/docs/docker>
-- Playwright 官方认证状态复用说明：<https://playwright.dev/python/docs/auth>
+- [Playwright 官方 Docker 文档](https://playwright.dev/python/docs/docker)
+- [Playwright 官方登录态复用文档](https://playwright.dev/python/docs/auth)

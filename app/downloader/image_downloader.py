@@ -1,21 +1,13 @@
 """
-这个文件负责“真正把图片下载到本地”。
+这个文件保留下载器对外门面。
 
-它的主要工作是：
-1. 从解析器给出的候选图片 URL 里挑出最合适的
+它现在主要负责：
+1. 组合下载计划器和本地路径构建器
 2. 复用浏览器上下文里的登录态和 cookies
-3. 带着正确的请求头请求 Pixiv 图片
-4. 把图片写入本地文件
-
-之所以不能只写一句 `httpx.get(url)`，是因为 Pixiv 图片请求通常还需要：
-- `Referer`
-- 登录 cookies
-否则很容易拿到 403 或错误页面。
+3. 构造请求头并执行真实图片下载
+4. 保持任务层依赖的公开接口稳定
 """
 
-import mimetypes
-import re
-from html import unescape
 from pathlib import Path
 from urllib.parse import quote
 from urllib.parse import urlparse
@@ -24,7 +16,13 @@ import httpx
 
 from app.browser.client import BrowserClient
 from app.core.config import settings
+from app.core.logging_config import get_logger
+from app.downloader.download_path_builder import DownloadPathBuilder
+from app.downloader.download_planner import DownloadPlanner, PreparedArtworkDownload
 from app.schemas.artwork import ArtworkInfo
+
+
+logger = get_logger(__name__)
 
 
 class PixivImageDownloader:
@@ -46,261 +44,8 @@ class PixivImageDownloader:
         """
         self.client = client
         self.download_dir = Path(download_dir or settings.download_dir)
-
-    def _normalize_url(self, url: str) -> str:
-        """
-        把 HTML / JSON 里的转义 URL 还原成正常 URL。
-        """
-        return unescape(url.replace("\\/", "/").replace("\\u0026", "&")).strip()
-
-    def _score_url(self, url: str) -> int:
-        """
-        给候选图片 URL 打分。
-
-        分数越高，说明我们越偏向选择它。
-        """
-        if "img-original" in url:
-            return 500
-        if "img-master" in url:
-            return 400
-        if "custom-thumb" in url:
-            return 300
-        if "square" in url:
-            return 200
-        if "embed.pixiv.net/artwork.php" in url:
-            return 100
-        return 0
-
-    def _extract_page_index(self, url: str) -> int | None:
-        """
-        从 URL 中提取页码，比如 `_p0`、`_p1`。
-        """
-        match = re.search(r"_p(\d+)", url)
-        if not match:
-            return None
-        return int(match.group(1))
-
-    def _swap_page_index(self, url: str, page_index: int) -> str:
-        """
-        把 URL 里的页码替换成指定页码。
-        """
-        return re.sub(r"_p\d+", f"_p{page_index}", url, count=1)
-
-    def _build_download_plan(self, artwork: ArtworkInfo) -> list[tuple[int, str]]:
-        """
-        生成下载计划。
-
-        返回值格式是：
-        `(页码, 图片地址)`
-
-        处理思路：
-        - 先清洗 URL
-        - 再按页码归类
-        - 同一页存在多个候选时，选得分更高的那个
-        - 如果知道总页数，但只拿到 `p0`，就尝试推导 `p1/p2...`
-        """
-        normalized_urls = []
-        for url in artwork.possible_image_urls:
-            normalized = self._normalize_url(url)
-            if normalized and normalized not in normalized_urls:
-                normalized_urls.append(normalized)
-
-        page_url_map: dict[int, str] = {}
-        fallback_urls: list[str] = []
-
-        for url in normalized_urls:
-            page_index = self._extract_page_index(url)
-            if page_index is None:
-                # 没有页码的地址先记到兜底列表里。
-                fallback_urls.append(url)
-                continue
-
-            current_url = page_url_map.get(page_index)
-            if current_url is None or self._score_url(url) > self._score_url(current_url):
-                page_url_map[page_index] = url
-
-        if page_url_map:
-            # `page_count` 可能比目前看到的页码更多，
-            # 说明还需要补齐缺失页。
-            page_count = max(artwork.page_count, max(page_url_map) + 1)
-
-            # 选一个质量最高的地址作为“模板 URL”，后面用它推导其他页。
-            _, seed_url = max(
-                page_url_map.items(),
-                key=lambda item: self._score_url(item[1]),
-            )
-
-            for page_index in range(page_count):
-                if page_index not in page_url_map:
-                    page_url_map[page_index] = self._swap_page_index(seed_url, page_index)
-
-            return sorted(page_url_map.items())
-
-        if fallback_urls:
-            best_fallback = max(fallback_urls, key=self._score_url)
-            return [(0, best_fallback)]
-
-        return []
-
-    def _fetch_artwork_pages_data(self, artwork: ArtworkInfo) -> list[dict]:
-        """
-        通过浏览器页面内的 `fetch` 调 Pixiv 作品页接口，拿到每一页的图片信息。
-
-        为什么要在浏览器页面里请求，而不是直接用 `httpx` 请求接口？
-        - 直接请求 Pixiv AJAX 接口时，容易被 Cloudflare 拦住
-        - 浏览器页面已经通过了站点的前端校验和登录态检查
-        - 在页面上下文里 `fetch`，成功率会高很多
-
-        成功时返回每一页对应的字典列表，失败时返回空列表。
-        """
-        page = self.client.get_page()
-        artwork_url = artwork.canonical_url or f"https://www.pixiv.net/artworks/{artwork.artwork_id}"
-
-        if f"/artworks/{artwork.artwork_id}" not in page.url:
-            try:
-                page.goto(artwork_url, wait_until="domcontentloaded", timeout=60000)
-                page.wait_for_timeout(3000)
-            except Exception:
-                return []
-
-        try:
-            result = page.evaluate(
-                """
-                async (artworkId) => {
-                    const response = await fetch(`/ajax/illust/${artworkId}/pages?lang=zh`, {
-                        credentials: 'include'
-                    });
-
-                    if (!response.ok) {
-                        return { ok: false, status: response.status, body: [] };
-                    }
-
-                    const data = await response.json();
-                    return {
-                        ok: !data.error,
-                        status: response.status,
-                        body: Array.isArray(data.body) ? data.body : []
-                    };
-                }
-                """,
-                artwork.artwork_id,
-            )
-        except Exception:
-            return []
-
-        if not result.get("ok"):
-            return []
-
-        body = result.get("body", [])
-        return body if isinstance(body, list) else []
-
-    def _enrich_artwork_from_pages_api(self, artwork: ArtworkInfo) -> ArtworkInfo:
-        """
-        用 Pixiv 页码接口补全真实图片地址和总页数。
-
-        如果接口可用，就把每一页的原图 URL 合并进 `possible_image_urls`，
-        同时把 `page_count` 更新成接口返回的真实页数。
-        """
-        pages_data = self._fetch_artwork_pages_data(artwork)
-        if not pages_data:
-            return artwork
-
-        page_urls: list[str] = []
-        for item in pages_data:
-            if not isinstance(item, dict):
-                continue
-
-            urls = item.get("urls", {})
-            if not isinstance(urls, dict):
-                continue
-
-            for key in ("original", "regular", "small", "thumb_mini"):
-                value = urls.get(key)
-                if isinstance(value, str) and value.strip():
-                    page_urls.append(self._normalize_url(value))
-
-        if not page_urls:
-            return artwork
-
-        merged_urls = list(dict.fromkeys(page_urls + artwork.possible_image_urls))
-        return artwork.model_copy(
-            update={
-                "possible_image_urls": merged_urls,
-                "page_count": max(artwork.page_count, len(pages_data)),
-            }
-        )
-
-    def _plan_looks_like_preview_only(self, download_plan: list[tuple[int, str]]) -> bool:
-        """
-        判断当前下载计划是不是只拿到了分享预览图。
-
-        典型特征就是：
-        - 下载计划不为空
-        - 里面所有地址都还是 `embed.pixiv.net/artwork.php?...`
-
-        这种地址虽然能返回一张图片，但通常不是原始作品图，
-        更像社交分享卡片。
-        """
-        return bool(download_plan) and all(
-            "embed.pixiv.net/artwork.php" in url for _, url in download_plan
-        )
-
-    def _extract_live_page_image_urls(self, artwork_id: str) -> list[str]:
-        """
-        直接从当前浏览器页面的 DOM 中补抓作品图片 URL。
-
-        这个方法主要是给下载器兜底用的：
-        - 如果解析器只拿到了 `og:image`
-        - 但浏览器页面里其实已经出现了真实图片链接
-        - 那就优先使用页面里的真实链接
-        """
-        page = self.client.get_page()
-
-        if f"/artworks/{artwork_id}" not in page.url:
-            return []
-
-        try:
-            page.wait_for_function(
-                """
-                (artworkId) => {
-                    const imageAnchor = document.querySelector(`a[href*="${artworkId}_p"][href*="i.pximg.net"]`);
-                    const imageNode = document.querySelector(`img[src*="${artworkId}_p"]`);
-                    return Boolean(imageAnchor || imageNode);
-                }
-                """,
-                arg=artwork_id,
-                timeout=10000,
-            )
-        except Exception:
-            pass
-
-        try:
-            urls = page.evaluate(
-                """
-                (artworkId) => {
-                    const values = new Set();
-
-                    for (const anchor of document.querySelectorAll('a[href*="i.pximg.net"]')) {
-                        if (anchor.href.includes(`${artworkId}_p`)) {
-                            values.add(anchor.href);
-                        }
-                    }
-
-                    for (const image of document.querySelectorAll('img[src*="pximg.net"]')) {
-                        if (image.src.includes(`${artworkId}_p`)) {
-                            values.add(image.src);
-                        }
-                    }
-
-                    return Array.from(values);
-                }
-                """,
-                artwork_id,
-            )
-        except Exception:
-            return []
-
-        return [self._normalize_url(url) for url in urls if url]
+        self.path_builder = DownloadPathBuilder(self.download_dir)
+        self.planner = DownloadPlanner(client)
 
     def _get_request_headers(self, artwork: ArtworkInfo) -> dict[str, str]:
         """
@@ -315,6 +60,11 @@ class PixivImageDownloader:
             user_agent = self.client.get_page().evaluate("() => navigator.userAgent")
         except Exception:
             # 如果读取失败，就静默回退到默认值。
+            logger.debug(
+                "读取 navigator.userAgent 失败，回退默认值：%s",
+                artwork.artwork_id,
+                exc_info=True,
+            )
             pass
 
         referer = artwork.canonical_url or f"https://www.pixiv.net/artworks/{artwork.artwork_id}"
@@ -331,11 +81,28 @@ class PixivImageDownloader:
         cookies = httpx.Cookies()
 
         for cookie in self.client.get_context().cookies():
+            cookie_name = cookie.get("name")
+            cookie_value = cookie.get("value")
+            if not isinstance(cookie_name, str) or not isinstance(cookie_value, str):
+                continue
+
+            cookie_path = cookie.get("path")
+            path = cookie_path if isinstance(cookie_path, str) and cookie_path else "/"
+            cookie_domain = cookie.get("domain")
+
+            if isinstance(cookie_domain, str) and cookie_domain:
+                cookies.set(
+                    cookie_name,
+                    cookie_value,
+                    domain=cookie_domain,
+                    path=path,
+                )
+                continue
+
             cookies.set(
-                cookie["name"],
-                cookie["value"],
-                domain=cookie.get("domain"),
-                path=cookie.get("path", "/"),
+                cookie_name,
+                cookie_value,
+                path=path,
             )
 
         return cookies
@@ -370,60 +137,56 @@ class PixivImageDownloader:
 
         return f"{parsed.scheme}://{auth}@{host}"
 
+    def _build_download_plan(self, artwork: ArtworkInfo) -> list[tuple[int, str]]:
+        return self.planner.build_download_plan(artwork)
+
+    def _normalize_url(self, url: str) -> str:
+        return self.planner._normalize_url(url)
+
+    def _fetch_artwork_pages_data(self, artwork: ArtworkInfo) -> list[dict]:
+        return self.planner._fetch_artwork_pages_data(artwork)
+
+    def _enrich_artwork_from_pages_api(self, artwork: ArtworkInfo) -> ArtworkInfo:
+        pages_data = self._fetch_artwork_pages_data(artwork)
+        if not pages_data:
+            return artwork
+
+        page_urls: list[str] = []
+        for item in pages_data:
+            if not isinstance(item, dict):
+                continue
+
+            urls = item.get("urls", {})
+            if not isinstance(urls, dict):
+                continue
+
+            for key in ("original", "regular", "small", "thumb_mini"):
+                value = urls.get(key)
+                if isinstance(value, str) and value.strip():
+                    page_urls.append(self._normalize_url(value))
+
+        if not page_urls:
+            return artwork
+
+        merged_urls = list(dict.fromkeys(page_urls + artwork.possible_image_urls))
+        return artwork.model_copy(
+            update={
+                "possible_image_urls": merged_urls,
+                "page_count": max(artwork.page_count, len(pages_data)),
+            }
+        )
+
+    def _plan_looks_like_preview_only(self, download_plan: list[tuple[int, str]]) -> bool:
+        return self.planner._plan_looks_like_preview_only(download_plan)
+
+    def _extract_live_page_image_urls(self, artwork_id: str) -> list[str]:
+        return self.planner._extract_live_page_image_urls(artwork_id)
+
     def _infer_extension(self, url: str, content_type: str | None = None) -> str:
-        """
-        推断图片文件扩展名。
-
-        优先级：
-        1. 如果响应头已经明确告诉我们是图片，就优先相信响应头
-        2. 否则再看 URL 自己带不带后缀
-        3. 最后兜底用 `.bin`
-
-        这样可以避免这种情况：
-        - URL 长得像 `artwork.php?...`
-        - 但服务器实际返回的是 JPEG 图片
-        - 如果只看 URL，就会错误保存成 `.php`
-        """
-        if content_type:
-            normalized_type = content_type.split(";")[0].strip().lower()
-            guessed = mimetypes.guess_extension(normalized_type)
-            if guessed:
-                return ".jpg" if guessed == ".jpe" else guessed
-
-        suffix = Path(urlparse(url).path).suffix.lower()
-        if suffix:
-            return suffix
-
-        return ".bin"
-
-    def _sanitize_path_part(self, text: str) -> str:
-        """
-        把作者名这类文本清理成适合当文件夹名的样子。
-
-        Windows 文件系统对这些字符比较敏感：
-        `<>:"/\\|?*`
-        所以这里统一替换成下划线，避免保存文件时报错。
-        """
-        sanitized = re.sub(r'[<>:"/\\|?*]+', "_", text).strip(" .")
-        if not sanitized:
-            return "unknown_author"
-        return sanitized[:80]
+        return self.path_builder.infer_extension(url, content_type=content_type)
 
     def _build_author_folder_name(self, artwork: ArtworkInfo) -> str:
-        """
-        生成作者文件夹名。
-
-        目标是既尽量稳定，又尽量让人一眼能看懂：
-        - 优先保留作者名，方便直接浏览目录
-        - 如果有作者 ID，就顺手拼进去，减少重名概率
-        """
-        safe_author_name = self._sanitize_path_part(artwork.author_name or "unknown_author")
-        safe_user_id = self._sanitize_path_part(artwork.user_id)
-
-        if artwork.user_id:
-            return f"{safe_author_name}_{safe_user_id}"
-
-        return safe_author_name
+        return self.path_builder.build_author_folder_name(artwork)
 
     def _build_file_stem(
         self,
@@ -431,30 +194,11 @@ class PixivImageDownloader:
         page_index: int,
         total_pages: int,
     ) -> str:
-        """
-        生成图片文件名的“主干部分”，不包含扩展名。
-
-        现在文件名会优先使用作品标题，但会始终带上作品 ID。
-
-        这样做的原因是：
-        - 单看标题更容易认图
-        - 但不同作品可能重名
-        - 只在撞名时再补 ID，会让“是否已下载”的判断变得不可靠
-
-        所以这里采用一个更稳妥的规则：
-        “标题负责好读，作品 ID 负责唯一性”
-
-        命名规则：
-        - 单图作品：`作品标题__作品ID`
-        - 多图作品：`作品标题__作品ID_p0`、`作品标题__作品ID_p1`
-        """
-        safe_title = self._sanitize_path_part(artwork.title or artwork.artwork_id)
-        base_name = f"{safe_title}__{artwork.artwork_id}"
-
-        if total_pages <= 1:
-            return base_name
-
-        return f"{base_name}_p{page_index}"
+        return self.path_builder.build_file_stem(
+            artwork,
+            page_index,
+            total_pages=total_pages,
+        )
 
     def _build_output_path(
         self,
@@ -475,16 +219,13 @@ class PixivImageDownloader:
         也就是说，同一个作者的所有图片都会落进同一个目录里，
         不再是一张作品一个文件夹。
         """
-        author_dir = self.download_dir / self._build_author_folder_name(artwork)
-        author_dir.mkdir(parents=True, exist_ok=True)
-
-        extension = self._infer_extension(url, content_type=content_type)
-        stem = self._build_file_stem(
+        return self.path_builder.build_output_path(
             artwork,
             page_index,
-            total_pages=total_pages if total_pages is not None else artwork.page_count,
+            url,
+            content_type=content_type,
+            total_pages=total_pages,
         )
-        return author_dir / f"{stem}{extension}"
 
     def _prepare_download_targets(self, artwork: ArtworkInfo) -> tuple[ArtworkInfo, list[tuple[int, str]]]:
         """
@@ -518,13 +259,11 @@ class PixivImageDownloader:
         这里故意不强依赖扩展名，因为图片可能是 `.jpg`、`.png`，
         我们只关心“这一页是否已经存在可复用文件”。
         """
-        author_dir = self.download_dir / self._build_author_folder_name(artwork)
-        if not author_dir.exists():
-            return None
-
-        stem = self._build_file_stem(artwork, page_index, total_pages=total_pages)
-        matches = sorted(author_dir.glob(f"{stem}.*"))
-        return matches[0] if matches else None
+        return self.path_builder.find_existing_file_for_page(
+            artwork,
+            page_index,
+            total_pages=total_pages,
+        )
 
     def is_artwork_downloaded(self, artwork: ArtworkInfo) -> tuple[bool, list[str]]:
         """
@@ -538,7 +277,27 @@ class PixivImageDownloader:
         - 能生成出下载计划
         - 下载计划里每一页对应的本地文件都已经存在
         """
-        artwork, download_plan = self._prepare_download_targets(artwork)
+        prepared = self.prepare_artwork_download(artwork)
+        return self.is_prepared_artwork_downloaded(prepared)
+
+    def prepare_artwork_download(self, artwork: ArtworkInfo) -> PreparedArtworkDownload:
+        """
+        预先补全作品下载信息，并生成下载计划。
+
+        这样任务层可以只准备一次，再把同一份结果同时用于：
+        - 判断是否已下载
+        - 真正执行下载
+        """
+        return self._prepare_download_targets(artwork)
+
+    def is_prepared_artwork_downloaded(
+        self,
+        prepared: PreparedArtworkDownload,
+    ) -> tuple[bool, list[str]]:
+        """
+        基于已经准备好的下载信息判断作品是否已完整下载。
+        """
+        artwork, download_plan = prepared
         if not download_plan:
             return False, []
 
@@ -564,7 +323,18 @@ class PixivImageDownloader:
         - `overwrite=False`：文件已存在时不重复下载
         - `overwrite=True`：即使文件存在，也重新下载覆盖
         """
-        artwork, download_plan = self._prepare_download_targets(artwork)
+        prepared = self.prepare_artwork_download(artwork)
+        return self.download_prepared_artwork(prepared, overwrite=overwrite)
+
+    def download_prepared_artwork(
+        self,
+        prepared: PreparedArtworkDownload,
+        overwrite: bool = False,
+    ) -> list[str]:
+        """
+        基于已经准备好的下载信息执行真正的下载。
+        """
+        artwork, download_plan = prepared
 
         if not download_plan:
             raise RuntimeError(f"未找到可下载图片 URL，作品 ID: {artwork.artwork_id}")
@@ -574,17 +344,24 @@ class PixivImageDownloader:
         cookies = self._build_cookies()
         proxy_url = self._build_proxy_url()
 
-        client_kwargs: dict[str, object] = {
-            "headers": headers,
-            "cookies": cookies,
-            "follow_redirects": True,
-            "timeout": 60.0,
-        }
-        if proxy_url:
-            client_kwargs["proxy"] = proxy_url
-
         # 使用 `httpx.Client` 可以复用连接，效率更高。
-        with httpx.Client(**client_kwargs) as http_client:
+        if proxy_url:
+            http_client_context = httpx.Client(
+                headers=headers,
+                cookies=cookies,
+                follow_redirects=True,
+                timeout=60.0,
+                proxy=proxy_url,
+            )
+        else:
+            http_client_context = httpx.Client(
+                headers=headers,
+                cookies=cookies,
+                follow_redirects=True,
+                timeout=60.0,
+            )
+
+        with http_client_context as http_client:
             total_pages = len(download_plan)
             for page_index, url in download_plan:
                 existing_file = self._find_existing_file_for_page(
@@ -603,26 +380,29 @@ class PixivImageDownloader:
                     total_pages=total_pages,
                 )
 
-                response = http_client.get(url)
-                response.raise_for_status()
+                with http_client.stream("GET", url) as response:
+                    response.raise_for_status()
 
-                content_type = response.headers.get("content-type", "")
-                if "image/" not in content_type:
-                    raise RuntimeError(
-                        f"下载结果不是图片内容，作品 ID: {artwork.artwork_id}, URL: {url}"
+                    content_type = response.headers.get("content-type", "")
+                    if "image/" not in content_type:
+                        raise RuntimeError(
+                            f"下载结果不是图片内容，作品 ID: {artwork.artwork_id}, URL: {url}"
+                        )
+
+                    # 有些图片地址会跳转，所以这里用最终响应 URL 来重新推断扩展名。
+                    output_path = self._build_output_path(
+                        artwork,
+                        page_index,
+                        str(response.url),
+                        content_type=content_type,
+                        total_pages=total_pages,
                     )
 
-                # 有些图片地址会跳转，所以这里用最终响应 URL 来重新推断扩展名。
-                output_path = self._build_output_path(
-                    artwork,
-                    page_index,
-                    str(response.url),
-                    content_type=content_type,
-                    total_pages=total_pages,
-                )
+                    with output_path.open("wb") as output_file:
+                        for chunk in response.iter_bytes():
+                            if chunk:
+                                output_file.write(chunk)
 
-                # 把二进制图片内容写入本地文件。
-                output_path.write_bytes(response.content)
                 downloaded_files.append(str(output_path))
 
         return downloaded_files

@@ -16,9 +16,25 @@ import json
 import sqlite3
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 from app.core.config import settings
+
+
+class DownloadRecord(TypedDict):
+    artwork_id: str
+    title: str
+    author_name: str
+    page_count: int
+    status: str
+    error_type: str
+    download_count: int
+    saved_html: str
+    saved_json: str
+    downloaded_files: list[str]
+    error_message: str
+    created_at: str
+    updated_at: str
 
 
 class DownloadRecordRepository:
@@ -98,7 +114,7 @@ class DownloadRecordRepository:
                     """
                 )
 
-    def get_record(self, artwork_id: str) -> dict[str, Any] | None:
+    def get_record(self, artwork_id: str) -> DownloadRecord | None:
         """
         根据作品 ID 获取一条记录。
         """
@@ -233,13 +249,49 @@ class DownloadRecordRepository:
                 ),
             )
 
+    def mark_failed(self, artwork_id: str, *, error_type: str, error_message: str) -> None:
+        """
+        仅更新失败状态和错误信息，不覆盖已有的作品元数据。
+
+        这样可以避免作品曾经成功过、后来某次重试失败时，
+        把标题、作者、下载文件列表等历史信息清空掉。
+        """
+        now = datetime.now().isoformat(timespec="seconds")
+
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO download_records (
+                    artwork_id,
+                    status,
+                    error_type,
+                    error_message,
+                    created_at,
+                    updated_at
+                )
+                VALUES (?, 'failed', ?, ?, ?, ?)
+                ON CONFLICT(artwork_id) DO UPDATE SET
+                    status = 'failed',
+                    error_type = excluded.error_type,
+                    error_message = excluded.error_message,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    artwork_id,
+                    error_type,
+                    error_message,
+                    now,
+                    now,
+                ),
+            )
+
     def list_records(
         self,
         limit: int = 10,
         status: str | None = None,
         error_type: str | None = None,
         updated_before: str | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> list[DownloadRecord]:
         """
         按更新时间倒序列出最近的记录。
 
@@ -290,7 +342,7 @@ class DownloadRecordRepository:
         with self._connect() as connection:
             rows = connection.execute(sql, tuple(parameters)).fetchall()
 
-        records: list[dict[str, Any]] = []
+        records: list[DownloadRecord] = []
         for row in rows:
             records.append(
                 {

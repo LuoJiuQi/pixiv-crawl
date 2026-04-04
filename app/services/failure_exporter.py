@@ -6,6 +6,7 @@
 """
 
 from pathlib import Path
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from app.services.record_exporter import build_record_export_path, export_records
@@ -30,7 +31,7 @@ def build_failure_export_path(
 
 
 def export_failure_records(
-    records: list[dict[str, Any]],
+    records: Sequence[Mapping[str, Any]],
     output_path: str | Path,
     *,
     file_format: str = "json",

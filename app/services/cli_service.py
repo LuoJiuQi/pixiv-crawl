@@ -17,6 +17,7 @@ import re
 from typing import Literal, TypedDict
 
 from app.db.download_record_repository import DownloadRecordRepository
+from app.services import console_service
 from app.services.failure_exporter import build_failure_export_path, export_failure_records
 from app.services.record_exporter import build_record_export_path, export_records
 
@@ -39,15 +40,19 @@ def choose_action() -> str:
     返回的不是数字，而是更容易读懂的动作名。
     这样主流程后面判断时，代码会比判断 `1/2/3/4/5` 更清晰。
     """
-    print("请选择操作：")
-    print("1. 批量抓取作品")
-    print("2. 查看历史记录")
-    print("3. 重试失败任务")
-    print("4. 导出失败清单")
-    print("5. 归档并清理旧记录")
-    print("6. 按作者批量抓取作品")
+    console_service.show_menu(
+        [
+            "批量抓取作品",
+            "查看历史记录",
+            "重试失败任务",
+            "导出失败清单",
+            "归档并清理旧记录",
+            "按作者批量抓取作品",
+            "按关注列表更新画师",
+        ]
+    )
 
-    choice = input("请输入 1、2、3、4、5 或 6，直接回车默认 1：").strip()
+    choice = console_service.prompt("请输入 1、2、3、4、5、6 或 7，直接回车默认 1：").strip()
     if choice == "2":
         return "history"
     if choice == "3":
@@ -58,6 +63,8 @@ def choose_action() -> str:
         return "archive_records"
     if choice == "6":
         return "crawl_author"
+    if choice == "7":
+        return "crawl_following"
     return "crawl"
 
 
@@ -112,9 +119,15 @@ def collect_artwork_ids() -> list[str]:
     使用方式尽量做得“宽松”一点，
     因为实际使用时，你很可能是从网页、记事本、聊天窗口里直接复制过来。
     """
-    print("请输入 Pixiv 作品 ID，支持批量输入。")
-    print("可直接粘贴多个 ID 或作品链接，支持空格、逗号和多行。")
-    print("输入完成后，直接输入一个空行开始执行。")
+    console_service.show_section("请输入 Pixiv 作品 ID")
+    console_service.show_list(
+        "支持的输入方式",
+        [
+            "可直接粘贴多个 ID 或作品链接",
+            "支持空格、逗号和多行",
+            "输入完成后，直接输入一个空行开始执行",
+        ],
+    )
 
     lines: list[str] = []
     while True:
@@ -124,7 +137,7 @@ def collect_artwork_ids() -> list[str]:
             if lines:
                 break
 
-            print("还没有输入任何作品 ID，请至少输入一个。")
+            console_service.show_warning("还没有输入任何作品 ID，请至少输入一个。")
             continue
 
         lines.append(line)
@@ -146,20 +159,22 @@ def collect_author_options() -> AuthorCollectOptions:
     - 失败作品重试
     - 已完成老作品连续出现很多个后，提前停止
     """
-    print("请输入 Pixiv 作者 ID 或作者主页链接。")
-    raw_author = input("作者：").strip()
+    console_service.show_warning("请输入 Pixiv 作者 ID 或作者主页链接。")
+    raw_author = console_service.prompt("作者：").strip()
 
     user_id = parse_user_id(raw_author)
     if not user_id:
         raise RuntimeError("没有识别到有效的作者 ID，请检查输入格式。")
 
-    raw_limit = input("最多抓取多少个作品（直接回车默认全部）：").strip()
+    raw_limit = console_service.prompt("最多抓取多少个作品（直接回车默认全部）：").strip()
     if raw_limit.isdigit() and int(raw_limit) > 0:
         limit = int(raw_limit)
     else:
         limit = None
 
-    raw_mode = input("更新方式（incremental/full，直接回车默认 incremental）：").strip().lower()
+    raw_mode = console_service.prompt(
+        "更新方式（incremental/full，直接回车默认 incremental）："
+    ).strip().lower()
     update_mode: Literal["incremental", "full"]
     if raw_mode == "full":
         update_mode = "full"
@@ -168,7 +183,7 @@ def collect_author_options() -> AuthorCollectOptions:
 
     completed_streak_limit = 10
     if update_mode == "incremental":
-        raw_streak_limit = input(
+        raw_streak_limit = console_service.prompt(
             "连续遇到多少个已完成作品后停止扫描（直接回车默认 10）："
         ).strip()
         if raw_streak_limit.isdigit() and int(raw_streak_limit) > 0:
@@ -191,7 +206,9 @@ def collect_history_options() -> tuple[str | None, str | None, int]:
     - 失败类型过滤条件
     - 最多看多少条
     """
-    raw_status = input("按状态筛选（all/completed/failed，直接回车默认 all）：").strip().lower()
+    raw_status = console_service.prompt(
+        "按状态筛选（all/completed/failed，直接回车默认 all）："
+    ).strip().lower()
     if raw_status in {"completed", "failed"}:
         status = raw_status
     else:
@@ -199,13 +216,13 @@ def collect_history_options() -> tuple[str | None, str | None, int]:
 
     error_type = None
     if status in {None, "failed"}:
-        raw_error_type = input(
+        raw_error_type = console_service.prompt(
             "按失败类型筛选（all/login/timeout/download/...，直接回车默认 all）："
         ).strip().lower()
         if raw_error_type and raw_error_type != "all":
             error_type = raw_error_type
 
-    raw_limit = input("查看最近多少条记录（直接回车默认 10）：").strip()
+    raw_limit = console_service.prompt("查看最近多少条记录（直接回车默认 10）：").strip()
     limit = int(raw_limit) if raw_limit.isdigit() and int(raw_limit) > 0 else 10
     return status, error_type, limit
 
@@ -218,35 +235,22 @@ def show_history(record_repository: DownloadRecordRepository) -> None:
     它只负责把仓库层查到的数据，用人更容易读懂的方式展示出来。
     """
     summary = record_repository.get_status_summary()
-    print("当前数据库记录概览：")
-    print("completed =", summary.get("completed", 0))
-    print("failed =", summary.get("failed", 0))
-    print("pending =", summary.get("pending", 0))
+    console_service.show_summary(
+        "当前数据库记录概览",
+        [
+            ("completed", summary.get("completed", 0)),
+            ("failed", summary.get("failed", 0)),
+            ("pending", summary.get("pending", 0)),
+        ],
+    )
 
     error_type_summary = record_repository.get_error_type_summary(status="failed")
     if error_type_summary:
-        print("失败类型分布：", error_type_summary)
+        console_service.show_summary("失败类型分布", list(error_type_summary.items()))
 
     status, error_type, limit = collect_history_options()
     records = record_repository.list_records(limit=limit, status=status, error_type=error_type)
-
-    print()
-    print("========== 历史记录 ==========")
-    if not records:
-        print("当前没有符合条件的记录。")
-        return
-
-    for index, record in enumerate(records, start=1):
-        print(f"{index}. artwork_id = {record['artwork_id']}")
-        print(f"   status = {record['status']}")
-        print(f"   error_type = {record['error_type']}")
-        print(f"   title = {record['title']}")
-        print(f"   author_name = {record['author_name']}")
-        print(f"   page_count = {record['page_count']}")
-        print(f"   download_count = {record['download_count']}")
-        print(f"   updated_at = {record['updated_at']}")
-        if record["error_message"]:
-            print(f"   error_message = {record['error_message']}")
+    console_service.show_records("历史记录", records)
 
 
 def collect_retry_artwork_ids(record_repository: DownloadRecordRepository) -> list[str]:
@@ -260,20 +264,20 @@ def collect_retry_artwork_ids(record_repository: DownloadRecordRepository) -> li
     failed_count = summary.get("failed", 0)
 
     if failed_count <= 0:
-        print("数据库里当前没有失败记录，不需要重试。")
+        console_service.show_warning("数据库里当前没有失败记录，不需要重试。")
         return []
 
-    print(f"当前共有 {failed_count} 条失败记录。")
+    console_service.show_summary("失败记录概览", [("failed", failed_count)])
     error_type_summary = record_repository.get_error_type_summary(status="failed")
     if error_type_summary:
-        print("当前失败类型分布：", error_type_summary)
+        console_service.show_summary("当前失败类型分布", list(error_type_summary.items()))
 
-    raw_error_type = input(
+    raw_error_type = console_service.prompt(
         "这次只重试某一种失败类型吗？输入类型名，直接回车默认全部："
     ).strip().lower()
     error_type = raw_error_type or None
 
-    raw_limit = input("本次要重试最近多少条失败记录？直接回车默认全部：").strip()
+    raw_limit = console_service.prompt("本次要重试最近多少条失败记录？直接回车默认全部：").strip()
     if raw_limit.isdigit() and int(raw_limit) > 0:
         limit = int(raw_limit)
     else:
@@ -282,7 +286,7 @@ def collect_retry_artwork_ids(record_repository: DownloadRecordRepository) -> li
     records = record_repository.list_records(limit=limit, status="failed", error_type=error_type)
     artwork_ids = [str(record["artwork_id"]) for record in records]
 
-    print(f"本次将重试 {len(artwork_ids)} 个作品：{artwork_ids}")
+    console_service.show_list("本次将重试的作品 ID", artwork_ids)
     return artwork_ids
 
 
@@ -299,30 +303,30 @@ def export_failed_records(record_repository: DownloadRecordRepository) -> None:
     failed_count = summary.get("failed", 0)
 
     if failed_count <= 0:
-        print("数据库里当前没有失败记录，无需导出。")
+        console_service.show_warning("数据库里当前没有失败记录，无需导出。")
         return
 
     error_type_summary = record_repository.get_error_type_summary(status="failed")
     if error_type_summary:
-        print("当前失败类型分布：", error_type_summary)
+        console_service.show_summary("当前失败类型分布", list(error_type_summary.items()))
 
-    raw_error_type = input(
+    raw_error_type = console_service.prompt(
         "只导出某一种失败类型吗？输入类型名，直接回车默认全部："
     ).strip().lower()
     error_type = raw_error_type or None
 
-    raw_limit = input("本次最多导出多少条失败记录？直接回车默认全部：").strip()
+    raw_limit = console_service.prompt("本次最多导出多少条失败记录？直接回车默认全部：").strip()
     if raw_limit.isdigit() and int(raw_limit) > 0:
         limit = int(raw_limit)
     else:
         limit = failed_count
 
-    raw_format = input("导出格式（json/txt，直接回车默认 json）：").strip().lower()
+    raw_format = console_service.prompt("导出格式（json/txt，直接回车默认 json）：").strip().lower()
     file_format = raw_format if raw_format in {"json", "txt"} else "json"
 
     records = record_repository.list_records(limit=limit, status="failed", error_type=error_type)
     if not records:
-        print("当前没有符合条件的失败记录可导出。")
+        console_service.show_warning("当前没有符合条件的失败记录可导出。")
         return
 
     output_path = build_failure_export_path(
@@ -332,8 +336,8 @@ def export_failed_records(record_repository: DownloadRecordRepository) -> None:
     )
     exported_path = export_failure_records(records, output_path, file_format=file_format)
 
-    print(f"已导出 {len(records)} 条失败记录。")
-    print("导出文件：", str(exported_path))
+    console_service.show_success(f"已导出 {len(records)} 条失败记录。")
+    console_service.show_success(f"导出文件：{exported_path}")
 
 
 def archive_old_records(record_repository: DownloadRecordRepository) -> None:
@@ -346,21 +350,23 @@ def archive_old_records(record_repository: DownloadRecordRepository) -> None:
     这样就算后面后悔了，也至少还有归档文件可查。
     """
     summary = record_repository.get_status_summary()
-    print("当前数据库记录概览：", summary)
+    console_service.show_summary("当前数据库记录概览", list(summary.items()))
 
-    raw_status = input("要归档哪种状态（completed/failed/all，直接回车默认 completed）：").strip().lower()
+    raw_status = console_service.prompt(
+        "要归档哪种状态（completed/failed/all，直接回车默认 completed）："
+    ).strip().lower()
     if raw_status in {"completed", "failed"}:
         status = raw_status
     else:
         status = None if raw_status == "all" else "completed"
 
-    raw_days = input("归档多少天以前的记录（直接回车默认 30）：").strip()
+    raw_days = console_service.prompt("归档多少天以前的记录（直接回车默认 30）：").strip()
     days = int(raw_days) if raw_days.isdigit() and int(raw_days) > 0 else 30
 
-    raw_limit = input("本次最多归档多少条（直接回车默认 100）：").strip()
+    raw_limit = console_service.prompt("本次最多归档多少条（直接回车默认 100）：").strip()
     limit = int(raw_limit) if raw_limit.isdigit() and int(raw_limit) > 0 else 100
 
-    raw_format = input("归档文件格式（json/txt，直接回车默认 json）：").strip().lower()
+    raw_format = console_service.prompt("归档文件格式（json/txt，直接回车默认 json）：").strip().lower()
     file_format = raw_format if raw_format in {"json", "txt"} else "json"
 
     cutoff_time = datetime.now() - timedelta(days=days)
@@ -372,15 +378,15 @@ def archive_old_records(record_repository: DownloadRecordRepository) -> None:
         updated_before=cutoff_text,
     )
     if not records:
-        print("当前没有符合条件的旧记录可归档。")
+        console_service.show_warning("当前没有符合条件的旧记录可归档。")
         return
 
-    print(f"本次将归档 {len(records)} 条记录。")
-    print("示例作品：", [record["artwork_id"] for record in records[:10]])
+    console_service.show_summary("归档预览", [("record_count", len(records))])
+    console_service.show_list("示例作品", [record["artwork_id"] for record in records[:10]])
 
-    confirm = input("确认执行归档并删除这些记录吗？输入 yes 确认：").strip().lower()
+    confirm = console_service.prompt("确认执行归档并删除这些记录吗？输入 yes 确认：").strip().lower()
     if confirm != "yes":
-        print("已取消归档。")
+        console_service.show_warning("已取消归档。")
         return
 
     output_path = build_record_export_path(
@@ -395,6 +401,6 @@ def archive_old_records(record_repository: DownloadRecordRepository) -> None:
         [str(record["artwork_id"]) for record in records]
     )
 
-    print(f"已归档 {len(records)} 条记录。")
-    print(f"实际删除 {deleted_count} 条数据库记录。")
-    print("归档文件：", str(exported_path))
+    console_service.show_success(f"已归档 {len(records)} 条记录。")
+    console_service.show_success(f"实际删除 {deleted_count} 条数据库记录。")
+    console_service.show_success(f"归档文件：{exported_path}")

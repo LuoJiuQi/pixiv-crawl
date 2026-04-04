@@ -7,6 +7,7 @@
 """
 
 import json
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -33,7 +34,7 @@ def build_record_export_path(
 
 
 def export_records(
-    records: list[dict[str, Any]],
+    records: Sequence[Mapping[str, Any]],
     output_path: str | Path,
     *,
     file_format: str = "json",
@@ -46,7 +47,7 @@ def export_records(
 
     normalized_format = file_format.lower()
     if normalized_format == "json":
-        path.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
+        path.write_text(json.dumps(list(records), ensure_ascii=False, indent=2), encoding="utf-8")
         return path
 
     if normalized_format == "txt":

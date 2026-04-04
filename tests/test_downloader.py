@@ -2,6 +2,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import cast
+from unittest.mock import patch
 
 from app.browser.client import BrowserClient
 from app.downloader.image_downloader import PixivImageDownloader
@@ -9,7 +10,65 @@ from app.schemas.artwork import ArtworkInfo
 
 
 class DummyClient:
-    pass
+    def __init__(self, page=None):
+        self._page = page or DummyPage()
+
+    def get_context(self):
+        return DummyContext()
+
+    def get_page(self):
+        return self._page
+
+
+class DummyContext:
+    def cookies(self):
+        return []
+
+
+class DummyPage:
+    def __init__(
+        self,
+        url: str = "https://www.pixiv.net/artworks/123456789",
+        *,
+        goto_error: Exception | None = None,
+        evaluate_error: Exception | None = None,
+        wait_for_function_error: Exception | None = None,
+        user_agent: str = "UnitTestAgent/1.0",
+    ):
+        self.url = url
+        self.goto_error = goto_error
+        self.evaluate_error = evaluate_error
+        self.wait_for_function_error = wait_for_function_error
+        self.user_agent = user_agent
+        self.goto_calls = []
+        self.wait_for_function_calls = []
+        self.evaluate_calls = []
+
+    def goto(self, url, wait_until=None, timeout=None):
+        self.goto_calls.append((url, wait_until, timeout))
+        if self.goto_error:
+            raise self.goto_error
+
+    def wait_for_timeout(self, timeout):
+        return None
+
+    def wait_for_function(self, script: str, arg=None, timeout=None):
+        self.wait_for_function_calls.append((script, arg, timeout))
+        if self.wait_for_function_error:
+            raise self.wait_for_function_error
+
+    def evaluate(self, script: str, *args):
+        self.evaluate_calls.append((script, args))
+        if self.evaluate_error:
+            raise self.evaluate_error
+        if "navigator.userAgent" in script:
+            return self.user_agent
+        if args:
+            return [
+                "https://i.pximg.net/img-original/img/2026/03/20/15/42/15/123456789_p0.jpg",
+                "https://i.pximg.net/img-original/img/2026/03/20/15/42/15/123456789_p1.jpg",
+            ]
+        return []
 
 
 def make_dummy_client() -> BrowserClient:
@@ -20,6 +79,10 @@ def make_dummy_client() -> BrowserClient:
     不会真的调用浏览器，因此这里用测试替身就足够了。
     """
     return cast(BrowserClient, DummyClient())
+
+
+def make_client_with_page(page: DummyPage) -> BrowserClient:
+    return cast(BrowserClient, DummyClient(page))
 
 
 class StubPagesDownloader(PixivImageDownloader):
@@ -39,203 +102,53 @@ class LocalOnlyDownloader(PixivImageDownloader):
         return []
 
 
+class StreamFriendlyDownloader(LocalOnlyDownloader):
+    def _prepare_download_targets(self, artwork: ArtworkInfo) -> tuple[ArtworkInfo, list[tuple[int, str]]]:
+        return artwork, [(0, artwork.possible_image_urls[0])]
+
+
 class PixivImageDownloaderTestCase(unittest.TestCase):
     def setUp(self) -> None:
         self.downloader = PixivImageDownloader(make_dummy_client())
 
-    def test_build_author_folder_name_prefers_author_name_and_user_id(self) -> None:
+    def test_get_request_headers_logs_debug_and_falls_back_to_default_user_agent(self) -> None:
+        page = DummyPage(
+            evaluate_error=RuntimeError("user agent unavailable"),
+        )
+        downloader = PixivImageDownloader(make_client_with_page(page))
         artwork = ArtworkInfo(
             artwork_id="123456789",
-            user_id="998877",
-            author_name="mignon",
+            canonical_url="https://www.pixiv.net/artworks/123456789",
         )
+        logger_name = f"pixiv_crawl.{PixivImageDownloader.__module__}"
 
-        folder_name = self.downloader._build_author_folder_name(artwork)
+        with self.assertLogs(logger_name, level="DEBUG") as captured:
+            headers = downloader._get_request_headers(artwork)
 
-        self.assertEqual(folder_name, "mignon_998877")
+        self.assertEqual(headers["User-Agent"], downloader.DEFAULT_USER_AGENT)
+        self.assertEqual(headers["Referer"], "https://www.pixiv.net/artworks/123456789")
+        self.assertTrue(any("读取 navigator.userAgent 失败" in message for message in captured.output))
 
-    def test_build_file_stem_uses_title_for_single_page_artwork(self) -> None:
-        artwork = ArtworkInfo(
-            artwork_id="123456789",
-            title="引きこもりの妹が制服を着てみた回",
-            page_count=1,
-        )
+    def test_build_cookies_skips_entries_missing_required_fields(self) -> None:
+        class CookieClient(DummyClient):
+            def get_context(self):
+                class CookieContext:
+                    def cookies(self):
+                        return [
+                            {"name": "session", "value": "abc", "path": "/"},
+                            {"value": "missing_name"},
+                            {"name": "missing_value"},
+                        ]
 
-        stem = self.downloader._build_file_stem(artwork, page_index=0, total_pages=1)
+                return CookieContext()
 
-        self.assertEqual(stem, "引きこもりの妹が制服を着てみた回__123456789")
+        downloader = PixivImageDownloader(cast(BrowserClient, CookieClient()))
 
-    def test_build_file_stem_adds_page_suffix_for_multi_page_artwork(self) -> None:
-        artwork = ArtworkInfo(
-            artwork_id="123456789",
-            title="制服まとめ",
-            page_count=3,
-        )
+        cookies = downloader._build_cookies()
 
-        stem = self.downloader._build_file_stem(artwork, page_index=1, total_pages=3)
-
-        self.assertEqual(stem, "制服まとめ__123456789_p1")
-
-    def test_build_file_stem_keeps_artworks_unique_even_when_titles_match(self) -> None:
-        first_artwork = ArtworkInfo(
-            artwork_id="111111111",
-            title="同名作品",
-            page_count=1,
-        )
-        second_artwork = ArtworkInfo(
-            artwork_id="222222222",
-            title="同名作品",
-            page_count=1,
-        )
-
-        first_stem = self.downloader._build_file_stem(first_artwork, page_index=0, total_pages=1)
-        second_stem = self.downloader._build_file_stem(second_artwork, page_index=0, total_pages=1)
-
-        self.assertNotEqual(first_stem, second_stem)
-
-    def test_build_download_plan_prefers_original_image(self) -> None:
-        artwork = ArtworkInfo(
-            artwork_id="142543623",
-            page_count=1,
-            possible_image_urls=[
-                "https://i.pximg.net/img-master/img/2026/03/21/00/12/12/142543623_p0_master1200.jpg",
-                "https://i.pximg.net/img-original/img/2026/03/21/00/12/12/142543623_p0.jpg",
-                "https://embed.pixiv.net/artwork.php?illust_id=142543623&mdate=1774019532",
-            ],
-        )
-
-        plan = self.downloader._build_download_plan(artwork)
-
-        self.assertEqual(
-            plan,
-            [
-                (
-                    0,
-                    "https://i.pximg.net/img-original/img/2026/03/21/00/12/12/142543623_p0.jpg",
-                )
-            ],
-        )
-
-    def test_build_download_plan_expands_multi_page_from_p0(self) -> None:
-        artwork = ArtworkInfo(
-            artwork_id="123456789",
-            page_count=3,
-            possible_image_urls=[
-                "https://i.pximg.net/img-original/img/2026/03/21/00/12/12/123456789_p0.png",
-            ],
-        )
-
-        plan = self.downloader._build_download_plan(artwork)
-
-        self.assertEqual(
-            plan,
-            [
-                (0, "https://i.pximg.net/img-original/img/2026/03/21/00/12/12/123456789_p0.png"),
-                (1, "https://i.pximg.net/img-original/img/2026/03/21/00/12/12/123456789_p1.png"),
-                (2, "https://i.pximg.net/img-original/img/2026/03/21/00/12/12/123456789_p2.png"),
-            ],
-        )
-
-    def test_build_download_plan_falls_back_to_embed_url(self) -> None:
-        artwork = ArtworkInfo(
-            artwork_id="142501413",
-            page_count=1,
-            possible_image_urls=[
-                "https://embed.pixiv.net/artwork.php?illust_id=142501413&mdate=1773932425",
-            ],
-        )
-
-        plan = self.downloader._build_download_plan(artwork)
-
-        self.assertEqual(
-            plan,
-            [(0, "https://embed.pixiv.net/artwork.php?illust_id=142501413&mdate=1773932425")],
-        )
-
-    def test_infer_extension_prefers_image_content_type_over_php_url(self) -> None:
-        extension = self.downloader._infer_extension(
-            "https://embed.pixiv.net/artwork.php?illust_id=142522397&mdate=1774000000",
-            content_type="image/jpeg",
-        )
-
-        self.assertEqual(extension, ".jpg")
-
-    def test_plan_looks_like_preview_only_for_embed_urls(self) -> None:
-        self.assertTrue(
-            self.downloader._plan_looks_like_preview_only(
-                [(0, "https://embed.pixiv.net/artwork.php?illust_id=142522397&mdate=1774000000")]
-            )
-        )
-        self.assertFalse(
-            self.downloader._plan_looks_like_preview_only(
-                [(0, "https://i.pximg.net/img-original/img/2026/03/20/15/42/15/142522397_p0.jpg")]
-            )
-        )
-
-    def test_enrich_artwork_from_pages_api_updates_urls_and_page_count(self) -> None:
-        downloader = StubPagesDownloader(
-            [
-                {
-                    "urls": {
-                        "original": "https://i.pximg.net/img-original/img/2026/03/20/15/42/15/123456789_p0.jpg",
-                        "regular": "https://i.pximg.net/img-master/img/2026/03/20/15/42/15/123456789_p0_master1200.jpg",
-                    }
-                },
-                {
-                    "urls": {
-                        "original": "https://i.pximg.net/img-original/img/2026/03/20/15/42/15/123456789_p1.jpg",
-                        "regular": "https://i.pximg.net/img-master/img/2026/03/20/15/42/15/123456789_p1_master1200.jpg",
-                    }
-                },
-            ]
-        )
-        artwork = ArtworkInfo(
-            artwork_id="123456789",
-            page_count=1,
-            possible_image_urls=[
-                "https://embed.pixiv.net/artwork.php?illust_id=123456789&mdate=1774000000"
-            ],
-        )
-
-        enriched = downloader._enrich_artwork_from_pages_api(artwork)
-
-        self.assertEqual(enriched.page_count, 2)
-        self.assertIn(
-            "https://i.pximg.net/img-original/img/2026/03/20/15/42/15/123456789_p0.jpg",
-            enriched.possible_image_urls,
-        )
-        self.assertIn(
-            "https://i.pximg.net/img-original/img/2026/03/20/15/42/15/123456789_p1.jpg",
-            enriched.possible_image_urls,
-        )
-
-    def test_build_download_plan_uses_api_enriched_multi_page_urls(self) -> None:
-        downloader = StubPagesDownloader(
-            [
-                {"urls": {"original": "https://i.pximg.net/img-original/img/2026/03/20/15/42/15/123456789_p0.jpg"}},
-                {"urls": {"original": "https://i.pximg.net/img-original/img/2026/03/20/15/42/15/123456789_p1.jpg"}},
-                {"urls": {"original": "https://i.pximg.net/img-original/img/2026/03/20/15/42/15/123456789_p2.jpg"}},
-            ]
-        )
-        artwork = ArtworkInfo(
-            artwork_id="123456789",
-            page_count=1,
-            possible_image_urls=[
-                "https://embed.pixiv.net/artwork.php?illust_id=123456789&mdate=1774000000"
-            ],
-        )
-
-        enriched = downloader._enrich_artwork_from_pages_api(artwork)
-        plan = downloader._build_download_plan(enriched)
-
-        self.assertEqual(
-            plan,
-            [
-                (0, "https://i.pximg.net/img-original/img/2026/03/20/15/42/15/123456789_p0.jpg"),
-                (1, "https://i.pximg.net/img-original/img/2026/03/20/15/42/15/123456789_p1.jpg"),
-                (2, "https://i.pximg.net/img-original/img/2026/03/20/15/42/15/123456789_p2.jpg"),
-            ],
-        )
+        self.assertEqual(cookies.get("session"), "abc")
+        self.assertIsNone(cookies.get("missing_name"))
+        self.assertIsNone(cookies.get("missing_value"))
 
     def test_is_artwork_downloaded_returns_true_when_all_pages_exist(self) -> None:
         artwork = ArtworkInfo(
@@ -285,6 +198,63 @@ class PixivImageDownloaderTestCase(unittest.TestCase):
 
         self.assertFalse(is_downloaded)
         self.assertEqual(existing_files, [])
+
+    def test_download_artwork_streams_response_body_to_disk(self) -> None:
+        artwork = ArtworkInfo(
+            artwork_id="123456789",
+            user_id="998877",
+            author_name="mignon",
+            title="制服まとめ",
+            page_count=1,
+            canonical_url="https://www.pixiv.net/artworks/123456789",
+            possible_image_urls=[
+                "https://i.pximg.net/img-original/img/2026/03/20/15/42/15/123456789_p0.jpg",
+            ],
+        )
+
+        class FakeResponse:
+            def __init__(self) -> None:
+                self.headers = {"content-type": "image/jpeg"}
+                self.url = artwork.possible_image_urls[0]
+
+            def raise_for_status(self) -> None:
+                return None
+
+            def iter_bytes(self) -> list[bytes]:
+                return [b"chunk1", b"chunk2"]
+
+        class FakeStreamContext:
+            def __enter__(self):
+                return FakeResponse()
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class FakeHttpClient:
+            def __init__(self, **kwargs):
+                self.kwargs = kwargs
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def stream(self, method: str, url: str):
+                self.last_request = (method, url)
+                return FakeStreamContext()
+
+        with TemporaryDirectory() as temp_dir:
+            downloader = StreamFriendlyDownloader(make_dummy_client(), download_dir=temp_dir)
+
+            with patch("app.downloader.image_downloader.httpx.Client", FakeHttpClient):
+                downloaded_files = downloader.download_artwork(artwork)
+
+            saved_path = Path(downloaded_files[0])
+            saved_bytes = saved_path.read_bytes()
+
+        self.assertEqual(saved_bytes, b"chunk1chunk2")
+        self.assertEqual(saved_path.suffix, ".jpg")
 
 
 if __name__ == "__main__":
