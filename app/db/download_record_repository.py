@@ -14,9 +14,10 @@
 
 import json
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, Iterator, TypedDict
 
 from app.core.config import settings
 
@@ -71,6 +72,25 @@ class DownloadRecordRepository:
         connection.row_factory = sqlite3.Row
         return connection
 
+    @contextmanager
+    def _connection(self) -> Iterator[sqlite3.Connection]:
+        """
+        提供一个会在使用结束后显式关闭的数据库连接。
+
+        `sqlite3.Connection` 自带的上下文管理器只负责提交或回滚事务，
+        并不会顺手关闭连接。在 Windows 上如果这里不主动 `close()`，
+        临时数据库文件很容易一直被句柄占住，导致测试清理目录失败。
+        """
+        connection = self._connect()
+        try:
+            yield connection
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
     def initialize(self) -> None:
         """
         初始化数据库表。
@@ -78,7 +98,7 @@ class DownloadRecordRepository:
         这一步可以放心重复调用，
         因为 `CREATE TABLE IF NOT EXISTS` 本来就是幂等的。
         """
-        with self._connect() as connection:
+        with self._connection() as connection:
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS download_records (
@@ -118,7 +138,7 @@ class DownloadRecordRepository:
         """
         根据作品 ID 获取一条记录。
         """
-        with self._connect() as connection:
+        with self._connection() as connection:
             row = connection.execute(
                 """
                 SELECT
@@ -200,7 +220,7 @@ class DownloadRecordRepository:
         now = datetime.now().isoformat(timespec="seconds")
         downloaded_files_json = json.dumps(downloaded_files or [], ensure_ascii=False)
 
-        with self._connect() as connection:
+        with self._connection() as connection:
             connection.execute(
                 """
                 INSERT INTO download_records (
@@ -258,7 +278,7 @@ class DownloadRecordRepository:
         """
         now = datetime.now().isoformat(timespec="seconds")
 
-        with self._connect() as connection:
+        with self._connection() as connection:
             connection.execute(
                 """
                 INSERT INTO download_records (
@@ -339,7 +359,7 @@ class DownloadRecordRepository:
         sql += " ORDER BY updated_at DESC, artwork_id DESC LIMIT ?"
         parameters.append(limit)
 
-        with self._connect() as connection:
+        with self._connection() as connection:
             rows = connection.execute(sql, tuple(parameters)).fetchall()
 
         records: list[DownloadRecord] = []
@@ -372,7 +392,7 @@ class DownloadRecordRepository:
             return 0
 
         placeholders = ", ".join("?" for _ in artwork_ids)
-        with self._connect() as connection:
+        with self._connection() as connection:
             cursor = connection.execute(
                 f"DELETE FROM download_records WHERE artwork_id IN ({placeholders})",
                 tuple(artwork_ids),
@@ -383,7 +403,7 @@ class DownloadRecordRepository:
         """
         统计不同状态各有多少条记录。
         """
-        with self._connect() as connection:
+        with self._connection() as connection:
             rows = connection.execute(
                 """
                 SELECT status, COUNT(*) AS total
@@ -412,7 +432,7 @@ class DownloadRecordRepository:
 
         sql += " GROUP BY error_type"
 
-        with self._connect() as connection:
+        with self._connection() as connection:
             rows = connection.execute(sql, tuple(parameters)).fetchall()
 
         summary: dict[str, int] = {}
