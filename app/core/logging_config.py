@@ -10,11 +10,14 @@
 from pathlib import Path
 import logging
 import sys
+from logging.handlers import RotatingFileHandler
 
 from app.core.config import settings
 
 
 LOGGER_ROOT_NAME = "pixiv_crawl"
+CONSOLE_HANDLER_NAME = "pixiv_crawl_console"
+FILE_HANDLER_NAME = "pixiv_crawl_file"
 
 
 def get_logger(name: str | None = None) -> logging.Logger:
@@ -39,21 +42,70 @@ def configure_logging() -> logging.Logger:
     logger.setLevel(level)
     logger.propagate = False
 
-    if not logger.handlers:
+    console_handler = _get_named_handler(logger, CONSOLE_HANDLER_NAME)
+    if console_handler is None:
         console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.set_name(CONSOLE_HANDLER_NAME)
         console_handler.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
         logger.addHandler(console_handler)
 
-        if settings.log_path.strip():
-            log_path = Path(settings.log_path)
-            log_path.parent.mkdir(parents=True, exist_ok=True)
-            file_handler = logging.FileHandler(log_path, encoding="utf-8")
-            file_handler.setFormatter(
-                logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
-            )
-            logger.addHandler(file_handler)
+    _configure_file_handler(logger)
 
     for handler in logger.handlers:
         handler.setLevel(level)
 
     return logger
+
+
+def _configure_file_handler(logger: logging.Logger) -> None:
+    """
+    根据当前配置创建、复用或移除文件日志 handler。
+    """
+    log_path_text = settings.log_path.strip()
+    existing_handler = _get_named_handler(logger, FILE_HANDLER_NAME)
+
+    if not log_path_text:
+        if existing_handler is not None:
+            logger.removeHandler(existing_handler)
+            existing_handler.close()
+        return
+
+    log_path = Path(log_path_text)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    requires_replacement = (
+        existing_handler is None
+        or not isinstance(existing_handler, RotatingFileHandler)
+        or Path(existing_handler.baseFilename) != log_path.resolve()
+        or existing_handler.maxBytes != settings.log_max_bytes
+        or existing_handler.backupCount != settings.log_backup_count
+    )
+
+    if not requires_replacement:
+        return
+
+    if existing_handler is not None:
+        logger.removeHandler(existing_handler)
+        existing_handler.close()
+
+    file_handler = RotatingFileHandler(
+        log_path,
+        maxBytes=settings.log_max_bytes,
+        backupCount=settings.log_backup_count,
+        encoding="utf-8",
+    )
+    file_handler.set_name(FILE_HANDLER_NAME)
+    file_handler.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+    )
+    logger.addHandler(file_handler)
+
+
+def _get_named_handler(logger: logging.Logger, name: str) -> logging.Handler | None:
+    """
+    根据 handler 名称查找已存在的日志处理器。
+    """
+    for handler in logger.handlers:
+        if handler.get_name() == name:
+            return handler
+    return None

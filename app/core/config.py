@@ -58,11 +58,11 @@ class Settings(BaseSettings):
 
     # 是否把调试用的 HTML / JSON 快照保存到 `data/temp`。
     # 关闭后，常规批量抓取时不会再持续写入大量调试文件。
-    save_debug_artifacts: bool = True
+    save_debug_artifacts: bool = False
 
     # 是否打印更详细的解析调试信息。
     # 关闭后，终端输出会更适合长期批量运行。
-    verbose_debug_output: bool = True
+    verbose_debug_output: bool = False
 
     # 图片下载目录。
     download_dir: str = "./data/images"
@@ -75,6 +75,13 @@ class Settings(BaseSettings):
 
     # 预留的日志文件路径。
     log_path: str = "./logs/app.log"
+
+    # 单个日志文件达到多大后开始滚动，单位是字节。
+    # 默认 5 MB，足够保留近期运行信息，又不会无限增长。
+    log_max_bytes: int = 5 * 1024 * 1024
+
+    # 最多保留多少个历史滚动日志文件。
+    log_backup_count: int = 5
 
     # 告诉 pydantic-settings 去哪里读取配置。
     model_config = SettingsConfigDict(
