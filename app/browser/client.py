@@ -21,6 +21,10 @@ from playwright._impl._api_structures import ProxySettings, StorageState
 
 from app.browser.state_manager import StateManager
 from app.core.config import settings
+from app.core.logging_config import get_logger
+
+
+logger = get_logger(__name__)
 
 
 class BrowserClient:
@@ -162,18 +166,29 @@ class BrowserClient:
 
         这样做更稳，也更不容易留下后台残留进程。
         """
-        if self.page is not None:
-            self.page.close()
-            self.page = None
+        self._safe_release("page", "close")
+        self._safe_release("context", "close")
+        self._safe_release("browser", "close")
+        self._safe_release("playwright", "stop")
 
-        if self.context is not None:
-            self.context.close()
-            self.context = None
+    def _safe_release(self, attribute_name: str, method_name: str) -> None:
+        """
+        尝试释放单个浏览器资源，即使失败也继续后面的清理。
 
-        if self.browser is not None:
-            self.browser.close()
-            self.browser = None
+        `main()` 会在 `finally` 里调用 `close()`。
+        如果这里某一步抛错就直接中断，后面的浏览器或 Playwright 进程
+        可能会残留在后台。所以这里采用 best-effort 策略：
+        - 尽量调用对应关闭方法
+        - 失败时记日志
+        - 无论成功失败，都把属性清空
+        """
+        resource = getattr(self, attribute_name)
+        if resource is None:
+            return
 
-        if self.playwright is not None:
-            self.playwright.stop()
-            self.playwright = None
+        try:
+            getattr(resource, method_name)()
+        except Exception:
+            logger.warning("关闭浏览器资源失败：%s.%s()", attribute_name, method_name, exc_info=True)
+        finally:
+            setattr(self, attribute_name, None)
