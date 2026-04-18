@@ -19,11 +19,11 @@
   <a href="#-测试">测试</a> |
 </p>
 
-## ✨ 项目定位
+## ✨ 项目介绍
 
-这个项目更像一个「可持续运行」的 Pixiv 下载工具，而不只是一次性的抓图脚本。
+本项目是一个「可持续运行」的 Pixiv 网站图片下载工具，而不只是一次性的抓图脚本。
 
-它适合用来做这些事情：
+适合用来做以下事情：
 
 - 批量抓取作品 ID 或作品链接
 - 按作者抓取全部作品，或只增量更新新作品
@@ -31,11 +31,11 @@
 - 对失败任务做重试、导出和归档
 - 保留本地历史记录，避免重复下载
 
-它目前不追求的方向：
+目前未实现的方向：
 
-- 官方 API 驱动的大规模数据采集
+- 官方 API 大规模数据采集
 - 分布式爬虫或高并发抓取平台
-- 绕过 Pixiv 登录限制的非浏览器方案
+- 绕过 Pixiv 登录限制的非浏览器方案（感觉不太能做到）
 
 ## 🚀 快速开始
 
@@ -54,10 +54,13 @@ playwright install chromium
 把 [`.env.example`](./.env.example) 复制为 `.env`，至少填写：
 
 ```env
+# Pixiv 账号
 PIXIV_USERNAME=
+# Pixiv 密码
 PIXIV_PASSWORD=
 HEADLESS=false
 ```
+> 注意！不要泄露个人账号！
 
 如果你的网络环境需要代理，再补：
 
@@ -82,7 +85,8 @@ VERBOSE_DEBUG_OUTPUT=false
 python main.py
 ```
 
-首次运行建议使用 `HEADLESS=false`，这样遇到 `reCAPTCHA` 时可以手动补验证并保存登录态。
+首次运行建议使用 `HEADLESS=false`，这样遇到 `reCAPTCHA` 时可以手动补验证并保存登录态。  
+目前在找方法看看怎么能才能绕过`reCAPTCHA`
 
 ## 📦 运行模式
 
@@ -150,7 +154,7 @@ flowchart LR
 
 ## 🗂 项目结构
 
-更完整的目录说明见 [项目结构.md](./项目结构.md) 和 [项目结构-代码编写.md](./项目结构-代码编写.md)。
+更完整的目录说明见 [项目结构.md](./项目结构.md) 和 [项目结构-代码编写.md](./项目结构-代码编写.md)(目前还未完善)。
 
 当前最重要的模块如下：
 
@@ -180,7 +184,7 @@ python -m unittest tests.test_task_service tests.test_author_crawler tests.test_
 
 推荐使用方式：
 
-1. 先在宿主机完成一次登录，生成 `data/state/storage_state.json`
+1. 先在主机完成一次登录，生成 `data/state/storage_state.json`
 2. 确认 `.env` 已准备好
 3. 构建镜像
 4. 启动容器
