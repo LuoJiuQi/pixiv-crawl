@@ -12,11 +12,11 @@
 </p>
 
 <p align="center">
-  <a href="#-快速开始">快速开始</a> ·
+  | <a href="#-快速开始">快速开始</a> ·
   <a href="#-运行模式">运行模式</a> ·
   <a href="#-核心能力">核心能力</a> ·
   <a href="#-项目结构">项目结构</a> ·
-  <a href="#-测试">测试</a>
+  <a href="#-测试">测试</a> |
 </p>
 
 ## ✨ 项目定位
@@ -95,6 +95,18 @@ python main.py
 | `5` | 归档并清理旧记录 |
 | `6` | 按作者批量抓取作品 |
 | `7` | 按关注列表更新画师 |
+
+除了菜单模式，也支持直接走非交互参数模式，适合 Docker、计划任务或脚本调用：
+
+```powershell
+python main.py crawl 142463788 https://www.pixiv.net/artworks/142543623
+python main.py crawl-author https://www.pixiv.net/users/123456 --update-mode incremental --completed-streak-limit 10
+python main.py crawl-following --limit 20 --completed-streak-limit 10
+python main.py retry-failed --error-type timeout --limit 50
+python main.py history --status failed --error-type timeout --limit 20
+python main.py export-failed --error-type download --format json
+python main.py archive-records --status completed --days 30 --limit 100 --format json --yes
+```
 
 ## 🧩 核心能力
 
@@ -188,6 +200,11 @@ docker compose run --rm pixiv-crawl
 
 - `VERBOSE_DEBUG_OUTPUT=true`
 - `SAVE_DEBUG_ARTIFACTS=true`
+
+日志文件默认会写到 `logs/app.log`，并按大小自动滚动：
+
+- `LOG_MAX_BYTES=5242880`
+- `LOG_BACKUP_COUNT=5`
 
 调试信息主要看两处：
 

@@ -15,6 +15,9 @@
 - 没学过代码的人也更容易看出每一步是在干什么
 """
 
+import argparse
+import sys
+
 from app.browser.client import BrowserClient
 from app.browser.login import PixivLoginService
 from app.core.logging_config import configure_logging, get_logger
@@ -31,6 +34,7 @@ from app.services.cli_service import (
     collect_artwork_ids,
     collect_retry_artwork_ids,
     export_failed_records,
+    parse_user_id,
     parse_artwork_ids,
     show_history,
 )
@@ -53,7 +57,170 @@ def action_requires_direct_artwork_input(action: str) -> bool:
     return action not in {"crawl_author", "crawl_following"}
 
 
-def main() -> None:
+def build_argument_parser() -> argparse.ArgumentParser:
+    """
+    构建非交互命令行参数解析器。
+
+    如果没有提供任何子命令，程序仍然会回到原来的交互菜单模式。
+    """
+    parser = argparse.ArgumentParser(
+        description="Pixiv 批量抓取工具。不给子命令时，将进入交互菜单模式。",
+    )
+    subparsers = parser.add_subparsers(dest="action")
+
+    crawl_parser = subparsers.add_parser("crawl", help="批量抓取作品")
+    crawl_parser.add_argument(
+        "artwork_inputs",
+        nargs="+",
+        help="作品 ID 或作品链接，可一次传多个。",
+    )
+
+    author_parser = subparsers.add_parser("crawl-author", help="按作者抓取作品")
+    author_parser.add_argument("author", help="作者 ID 或作者主页链接。")
+    author_parser.add_argument("--limit", type=int, default=0, help="最多抓取多少个作品。")
+    author_parser.add_argument(
+        "--update-mode",
+        choices=["incremental", "full"],
+        default="incremental",
+        help="作者抓取模式，默认 incremental。",
+    )
+    author_parser.add_argument(
+        "--completed-streak-limit",
+        type=int,
+        default=10,
+        help="增量模式下连续遇到多少个已完成作品后停止扫描。",
+    )
+
+    following_parser = subparsers.add_parser("crawl-following", help="按关注列表更新画师")
+    following_parser.add_argument("--limit", type=int, default=0, help="最多处理多少位关注画师。")
+    following_parser.add_argument(
+        "--completed-streak-limit",
+        type=int,
+        default=10,
+        help="每位作者增量模式下连续遇到多少个已完成作品后停止扫描。",
+    )
+
+    history_parser = subparsers.add_parser("history", help="查看历史记录")
+    history_parser.add_argument(
+        "--status",
+        choices=["all", "completed", "failed"],
+        default="all",
+        help="按状态筛选。",
+    )
+    history_parser.add_argument("--error-type", default="", help="按失败类型筛选。")
+    history_parser.add_argument("--limit", type=int, default=10, help="最多展示多少条记录。")
+
+    retry_parser = subparsers.add_parser("retry-failed", help="重试失败任务")
+    retry_parser.add_argument("--error-type", default="", help="只重试某一种失败类型。")
+    retry_parser.add_argument("--limit", type=int, default=0, help="最多重试多少条失败记录。")
+
+    export_parser = subparsers.add_parser("export-failed", help="导出失败清单")
+    export_parser.add_argument("--error-type", default="", help="只导出某一种失败类型。")
+    export_parser.add_argument("--limit", type=int, default=0, help="最多导出多少条失败记录。")
+    export_parser.add_argument(
+        "--format",
+        choices=["json", "txt"],
+        default="json",
+        help="导出格式。",
+    )
+
+    archive_parser = subparsers.add_parser("archive-records", help="归档并清理旧记录")
+    archive_parser.add_argument(
+        "--status",
+        choices=["all", "completed", "failed"],
+        default="completed",
+        help="要归档的记录状态。",
+    )
+    archive_parser.add_argument("--days", type=int, default=30, help="归档多少天以前的记录。")
+    archive_parser.add_argument("--limit", type=int, default=100, help="最多归档多少条记录。")
+    archive_parser.add_argument(
+        "--format",
+        choices=["json", "txt"],
+        default="json",
+        help="归档文件格式。",
+    )
+    archive_parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="确认执行归档并删除，不再二次提示。",
+    )
+
+    return parser
+
+
+def parse_runtime_arguments(argv: list[str] | None) -> argparse.Namespace | None:
+    """
+    解析运行时参数。
+
+    约定：
+    - `argv is None`：表示使用原来的交互模式
+    - `argv == []`：脚本直接启动但没带参数，也回到交互模式
+    """
+    if argv is None or not argv:
+        return None
+
+    parser = build_argument_parser()
+    args = parser.parse_args(argv)
+    raw_action = args.action
+
+    if raw_action == "crawl":
+        artwork_ids = parse_artwork_ids("\n".join(args.artwork_inputs))
+        if not artwork_ids:
+            parser.error("没有识别到有效的作品 ID，请传入作品 ID 或作品链接。")
+        args.artwork_ids = artwork_ids
+
+    if raw_action == "crawl-author":
+        user_id = parse_user_id(args.author)
+        if not user_id:
+            parser.error("没有识别到有效的作者 ID，请传入作者 ID 或作者主页链接。")
+        if args.limit < 0:
+            parser.error("--limit 不能小于 0。")
+        if args.completed_streak_limit <= 0:
+            parser.error("--completed-streak-limit 必须大于 0。")
+        args.author_request = {
+            "user_id": user_id,
+            "limit": args.limit or None,
+            "update_mode": args.update_mode,
+            "completed_streak_limit": args.completed_streak_limit,
+        }
+
+    if raw_action == "crawl-following":
+        if args.limit < 0:
+            parser.error("--limit 不能小于 0。")
+        if args.completed_streak_limit <= 0:
+            parser.error("--completed-streak-limit 必须大于 0。")
+        args.following_limit = args.limit or None
+
+    if raw_action == "history":
+        if args.limit <= 0:
+            parser.error("--limit 必须大于 0。")
+
+    if raw_action == "retry-failed":
+        if args.limit < 0:
+            parser.error("--limit 不能小于 0。")
+
+    if raw_action == "export-failed":
+        if args.limit < 0:
+            parser.error("--limit 不能小于 0。")
+
+    if raw_action == "archive-records":
+        if args.days <= 0:
+            parser.error("--days 必须大于 0。")
+        if args.limit <= 0:
+            parser.error("--limit 必须大于 0。")
+        if not args.yes:
+            parser.error("archive-records 需要显式传入 --yes 才会执行删除。")
+
+    args.action = raw_action.replace("-", "_")
+    return args
+
+
+def _normalize_optional_text(value: str | None) -> str | None:
+    text = str(value or "").strip().lower()
+    return text or None
+
+
+def main(argv: list[str] | None = None) -> None:
     """
     主函数。
 
@@ -68,35 +235,66 @@ def main() -> None:
     configure_logging()
     client = BrowserClient()
     record_repository = DownloadRecordRepository()
+    runtime_args = parse_runtime_arguments(argv)
+    interactive_mode = runtime_args is None
 
     try:
         # 先确保数据库表已经准备好。
         # 这样后面不管是查看历史、重试失败，还是正式抓取，都有地方读写记录。
         record_repository.initialize()
 
-        action = choose_action()
+        action = runtime_args.action if runtime_args else choose_action()
         if action == "history":
-            show_history(record_repository)
+            show_history(
+                record_repository,
+                status=None if not runtime_args or runtime_args.status == "all" else runtime_args.status,
+                error_type=_normalize_optional_text(runtime_args.error_type) if runtime_args else None,
+                limit=runtime_args.limit if runtime_args else 10,
+                prompt_for_filters=interactive_mode,
+            )
             return
 
         if action == "export_failed":
-            export_failed_records(record_repository)
+            export_failed_records(
+                record_repository,
+                error_type=_normalize_optional_text(runtime_args.error_type) if runtime_args else None,
+                limit=runtime_args.limit if runtime_args else None,
+                file_format=runtime_args.format if runtime_args else "json",
+                interactive=interactive_mode,
+            )
             return
 
         if action == "archive_records":
-            archive_old_records(record_repository)
+            archive_old_records(
+                record_repository,
+                status=(
+                    None
+                    if runtime_args and runtime_args.status == "all"
+                    else runtime_args.status if runtime_args else None
+                ),
+                days=runtime_args.days if runtime_args else 30,
+                limit=runtime_args.limit if runtime_args else 100,
+                file_format=runtime_args.format if runtime_args else "json",
+                interactive=interactive_mode,
+                confirmed=bool(runtime_args.yes) if runtime_args else False,
+            )
             return
 
         author_request: AuthorCollectOptions | None = None
         if action == "retry_failed":
-            artwork_ids = collect_retry_artwork_ids(record_repository)
+            artwork_ids = collect_retry_artwork_ids(
+                record_repository,
+                error_type=_normalize_optional_text(runtime_args.error_type) if runtime_args else None,
+                limit=runtime_args.limit if runtime_args else None,
+                interactive=interactive_mode,
+            )
             if not artwork_ids:
                 return
         elif action == "crawl_author":
-            author_request = collect_author_options()
+            author_request = runtime_args.author_request if runtime_args else collect_author_options()
             artwork_ids = []
         elif action_requires_direct_artwork_input(action):
-            artwork_ids = collect_artwork_ids()
+            artwork_ids = runtime_args.artwork_ids if runtime_args else collect_artwork_ids()
         else:
             artwork_ids = []
 
@@ -165,7 +363,9 @@ def main() -> None:
             # 这里的目标不是抓“一个作者”，
             # 而是先把“我当前关注的所有作者”收集出来，
             # 再逐个复用现有的作者增量更新流程。
-            followed_user_ids = author_crawler.collect_following_user_ids()
+            followed_user_ids = author_crawler.collect_following_user_ids(
+                limit=runtime_args.following_limit if runtime_args else None
+            )
             if not followed_user_ids:
                 logger.info("当前没有识别到任何已关注画师。")
                 return
@@ -197,7 +397,9 @@ def main() -> None:
                     selection = select_incremental_artwork_ids(
                         author_artwork_ids,
                         record_repository,
-                        completed_streak_limit=10,
+                        completed_streak_limit=(
+                            runtime_args.completed_streak_limit if runtime_args else 10
+                        ),
                     )
                     console_service.show_incremental_selection_summary(selection)
 
@@ -232,7 +434,8 @@ def main() -> None:
                 total_failed_results=total_failed_results,
             )
 
-            console_service.pause_before_exit()
+            if interactive_mode:
+                console_service.pause_before_exit()
             return
 
         logger.info("本次共识别到 %s 个作品 ID。", len(artwork_ids))
@@ -247,7 +450,8 @@ def main() -> None:
         console_service.show_batch_summary(summary)
 
         # 留一点时间给你人工确认结果。
-        console_service.pause_before_exit()
+        if interactive_mode:
+            console_service.pause_before_exit()
     finally:
         # 不管中间有没有报错，最后都要把浏览器关掉。
         # 这样可以避免后台残留浏览器进程。
@@ -258,4 +462,4 @@ def main() -> None:
 # 只有你“直接运行这个文件”时，程序才会从这里启动。
 # 如果别的文件只是 `import main`，那就不会自动执行。
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])

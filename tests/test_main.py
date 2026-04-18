@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 import main
-from main import action_requires_direct_artwork_input, parse_artwork_ids
+from main import action_requires_direct_artwork_input, parse_artwork_ids, parse_runtime_arguments
 
 
 class MainInputParsingTestCase(unittest.TestCase):
@@ -35,6 +35,41 @@ class MainInputParsingTestCase(unittest.TestCase):
         artwork_ids = parse_artwork_ids(raw_text)
 
         self.assertEqual(artwork_ids, [])
+
+    def test_parse_runtime_arguments_supports_crawl_inputs(self) -> None:
+        args = parse_runtime_arguments(
+            ["crawl", "142463788", "https://www.pixiv.net/artworks/142543623"]
+        )
+
+        self.assertIsNotNone(args)
+        self.assertEqual(args.action, "crawl")
+        self.assertEqual(args.artwork_ids, ["142463788", "142543623"])
+
+    def test_parse_runtime_arguments_supports_crawl_author_options(self) -> None:
+        args = parse_runtime_arguments(
+            [
+                "crawl-author",
+                "https://www.pixiv.net/users/123456",
+                "--limit",
+                "20",
+                "--update-mode",
+                "full",
+                "--completed-streak-limit",
+                "15",
+            ]
+        )
+
+        self.assertIsNotNone(args)
+        self.assertEqual(args.action, "crawl_author")
+        self.assertEqual(
+            args.author_request,
+            {
+                "user_id": "123456",
+                "limit": 20,
+                "update_mode": "full",
+                "completed_streak_limit": 15,
+            },
+        )
 
     def test_main_stops_when_login_fails(self) -> None:
         mock_client = MagicMock()
@@ -177,6 +212,39 @@ class MainInputParsingTestCase(unittest.TestCase):
             unittest.mock.call("本次作品 ID 列表：%s", ["100", "200"]),
             mocked_logger.info.call_args_list,
         )
+
+    def test_main_uses_cli_arguments_without_prompting_for_action_or_ids(self) -> None:
+        mock_client = MagicMock()
+        mock_client.state_manager.state_exists.return_value = True
+
+        mock_repository = MagicMock()
+        mock_login_service = MagicMock()
+        mock_login_service.is_logged_in.return_value = True
+        summary = {"success_results": [], "failed_results": []}
+
+        with patch("main.BrowserClient", return_value=mock_client), patch(
+            "main.DownloadRecordRepository",
+            return_value=mock_repository,
+        ), patch("main.PixivLoginService", return_value=mock_login_service), patch(
+            "main.configure_logging",
+        ), patch(
+            "main.choose_action"
+        ) as mocked_choose_action, patch(
+            "main.collect_artwork_ids"
+        ) as mocked_collect_artwork_ids, patch(
+            "main.process_artwork_batch",
+            return_value=summary,
+        ), patch(
+            "main.console_service.show_batch_summary"
+        ), patch(
+            "main.console_service.pause_before_exit"
+        ) as mocked_pause:
+            main.main(["crawl", "100", "200"])
+
+        mocked_choose_action.assert_not_called()
+        mocked_collect_artwork_ids.assert_not_called()
+        mocked_pause.assert_not_called()
+        mock_client.close.assert_called_once()
 
 
 if __name__ == "__main__":

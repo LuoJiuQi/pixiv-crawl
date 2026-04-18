@@ -227,12 +227,18 @@ def collect_history_options() -> tuple[str | None, str | None, int]:
     return status, error_type, limit
 
 
-def show_history(record_repository: DownloadRecordRepository) -> None:
+def show_history(
+    record_repository: DownloadRecordRepository,
+    *,
+    status: str | None = None,
+    error_type: str | None = None,
+    limit: int = 10,
+    prompt_for_filters: bool = True,
+) -> None:
     """
     把数据库里的历史记录打印出来。
 
-    这个函数不负责“怎么查数据库”，
-    它只负责把仓库层查到的数据，用人更容易读懂的方式展示出来。
+    这个函数既支持原来的交互模式，也支持外部直接传过滤条件的非交互模式。
     """
     summary = record_repository.get_status_summary()
     console_service.show_summary(
@@ -248,12 +254,20 @@ def show_history(record_repository: DownloadRecordRepository) -> None:
     if error_type_summary:
         console_service.show_summary("失败类型分布", list(error_type_summary.items()))
 
-    status, error_type, limit = collect_history_options()
+    if prompt_for_filters:
+        status, error_type, limit = collect_history_options()
+
     records = record_repository.list_records(limit=limit, status=status, error_type=error_type)
     console_service.show_records("历史记录", records)
 
 
-def collect_retry_artwork_ids(record_repository: DownloadRecordRepository) -> list[str]:
+def collect_retry_artwork_ids(
+    record_repository: DownloadRecordRepository,
+    *,
+    error_type: str | None = None,
+    limit: int | None = None,
+    interactive: bool = True,
+) -> list[str]:
     """
     从数据库里挑出这次要重试的失败作品 ID。
 
@@ -272,15 +286,18 @@ def collect_retry_artwork_ids(record_repository: DownloadRecordRepository) -> li
     if error_type_summary:
         console_service.show_summary("当前失败类型分布", list(error_type_summary.items()))
 
-    raw_error_type = console_service.prompt(
-        "这次只重试某一种失败类型吗？输入类型名，直接回车默认全部："
-    ).strip().lower()
-    error_type = raw_error_type or None
+    if interactive:
+        raw_error_type = console_service.prompt(
+            "这次只重试某一种失败类型吗？输入类型名，直接回车默认全部："
+        ).strip().lower()
+        error_type = raw_error_type or None
 
-    raw_limit = console_service.prompt("本次要重试最近多少条失败记录？直接回车默认全部：").strip()
-    if raw_limit.isdigit() and int(raw_limit) > 0:
-        limit = int(raw_limit)
-    else:
+        raw_limit = console_service.prompt("本次要重试最近多少条失败记录？直接回车默认全部：").strip()
+        if raw_limit.isdigit() and int(raw_limit) > 0:
+            limit = int(raw_limit)
+        else:
+            limit = failed_count
+    elif limit is None or limit <= 0:
         limit = failed_count
 
     records = record_repository.list_records(limit=limit, status="failed", error_type=error_type)
@@ -290,7 +307,14 @@ def collect_retry_artwork_ids(record_repository: DownloadRecordRepository) -> li
     return artwork_ids
 
 
-def export_failed_records(record_repository: DownloadRecordRepository) -> None:
+def export_failed_records(
+    record_repository: DownloadRecordRepository,
+    *,
+    error_type: str | None = None,
+    limit: int | None = None,
+    file_format: str = "json",
+    interactive: bool = True,
+) -> None:
     """
     把失败记录导出成单独文件。
 
@@ -310,19 +334,22 @@ def export_failed_records(record_repository: DownloadRecordRepository) -> None:
     if error_type_summary:
         console_service.show_summary("当前失败类型分布", list(error_type_summary.items()))
 
-    raw_error_type = console_service.prompt(
-        "只导出某一种失败类型吗？输入类型名，直接回车默认全部："
-    ).strip().lower()
-    error_type = raw_error_type or None
+    if interactive:
+        raw_error_type = console_service.prompt(
+            "只导出某一种失败类型吗？输入类型名，直接回车默认全部："
+        ).strip().lower()
+        error_type = raw_error_type or None
 
-    raw_limit = console_service.prompt("本次最多导出多少条失败记录？直接回车默认全部：").strip()
-    if raw_limit.isdigit() and int(raw_limit) > 0:
-        limit = int(raw_limit)
-    else:
+        raw_limit = console_service.prompt("本次最多导出多少条失败记录？直接回车默认全部：").strip()
+        if raw_limit.isdigit() and int(raw_limit) > 0:
+            limit = int(raw_limit)
+        else:
+            limit = failed_count
+
+        raw_format = console_service.prompt("导出格式（json/txt，直接回车默认 json）：").strip().lower()
+        file_format = raw_format if raw_format in {"json", "txt"} else "json"
+    elif limit is None or limit <= 0:
         limit = failed_count
-
-    raw_format = console_service.prompt("导出格式（json/txt，直接回车默认 json）：").strip().lower()
-    file_format = raw_format if raw_format in {"json", "txt"} else "json"
 
     records = record_repository.list_records(limit=limit, status="failed", error_type=error_type)
     if not records:
@@ -340,34 +367,41 @@ def export_failed_records(record_repository: DownloadRecordRepository) -> None:
     console_service.show_success(f"导出文件：{exported_path}")
 
 
-def archive_old_records(record_repository: DownloadRecordRepository) -> None:
+def archive_old_records(
+    record_repository: DownloadRecordRepository,
+    *,
+    status: str | None = "completed",
+    days: int = 30,
+    limit: int = 100,
+    file_format: str = "json",
+    interactive: bool = True,
+    confirmed: bool = False,
+) -> None:
     """
     先导出，再删除较旧的历史记录。
 
-    这是比较保守的做法：
-    - 先把数据另存一份
-    - 再真的从数据库里删掉
-    这样就算后面后悔了，也至少还有归档文件可查。
+    既支持交互确认，也支持外部传入参数的非交互模式。
     """
     summary = record_repository.get_status_summary()
     console_service.show_summary("当前数据库记录概览", list(summary.items()))
 
-    raw_status = console_service.prompt(
-        "要归档哪种状态（completed/failed/all，直接回车默认 completed）："
-    ).strip().lower()
-    if raw_status in {"completed", "failed"}:
-        status = raw_status
-    else:
-        status = None if raw_status == "all" else "completed"
+    if interactive:
+        raw_status = console_service.prompt(
+            "要归档哪种状态（completed/failed/all，直接回车默认 completed）："
+        ).strip().lower()
+        if raw_status in {"completed", "failed"}:
+            status = raw_status
+        else:
+            status = None if raw_status == "all" else "completed"
 
-    raw_days = console_service.prompt("归档多少天以前的记录（直接回车默认 30）：").strip()
-    days = int(raw_days) if raw_days.isdigit() and int(raw_days) > 0 else 30
+        raw_days = console_service.prompt("归档多少天以前的记录（直接回车默认 30）：").strip()
+        days = int(raw_days) if raw_days.isdigit() and int(raw_days) > 0 else 30
 
-    raw_limit = console_service.prompt("本次最多归档多少条（直接回车默认 100）：").strip()
-    limit = int(raw_limit) if raw_limit.isdigit() and int(raw_limit) > 0 else 100
+        raw_limit = console_service.prompt("本次最多归档多少条（直接回车默认 100）：").strip()
+        limit = int(raw_limit) if raw_limit.isdigit() and int(raw_limit) > 0 else 100
 
-    raw_format = console_service.prompt("归档文件格式（json/txt，直接回车默认 json）：").strip().lower()
-    file_format = raw_format if raw_format in {"json", "txt"} else "json"
+        raw_format = console_service.prompt("归档文件格式（json/txt，直接回车默认 json）：").strip().lower()
+        file_format = raw_format if raw_format in {"json", "txt"} else "json"
 
     cutoff_time = datetime.now() - timedelta(days=days)
     cutoff_text = cutoff_time.isoformat(timespec="seconds")
@@ -384,8 +418,11 @@ def archive_old_records(record_repository: DownloadRecordRepository) -> None:
     console_service.show_summary("归档预览", [("record_count", len(records))])
     console_service.show_list("示例作品", [record["artwork_id"] for record in records[:10]])
 
-    confirm = console_service.prompt("确认执行归档并删除这些记录吗？输入 yes 确认：").strip().lower()
-    if confirm != "yes":
+    if interactive:
+        confirm = console_service.prompt("确认执行归档并删除这些记录吗？输入 yes 确认：").strip().lower()
+        confirmed = confirm == "yes"
+
+    if not confirmed:
         console_service.show_warning("已取消归档。")
         return
 
