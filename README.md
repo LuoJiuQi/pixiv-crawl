@@ -1,6 +1,6 @@
 # pixiv-crawl
 
-<p align="center">一个基于 Playwright 的 Pixiv 批量抓取工具，支持登录态复用、批量作品抓取、作者增量更新、失败重试和 SQLite 记录。</p>
+<p align="center">一个基于 Playwright 的 Pixiv 网站批量抓取工具，支持登录态复用、批量作品抓取、作者增量更新、失败重试和 SQLite 记录。</p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white" alt="Python 3.12+" />
