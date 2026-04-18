@@ -10,7 +10,7 @@
 而是“自动优先，必要时人工兜底”。
 """
 
-from typing import TypedDict
+from typing import Any, TypedDict
 
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
@@ -52,6 +52,22 @@ class PixivLoginService:
         "reCAPTCHA認証を行ってください。",
         "reCAPTCHA",
         "CAPTCHA",
+    )
+
+    # 登录页常见的提交控件选择器。
+    SUBMIT_CONTROL_SELECTORS = (
+        'button[type="submit"]',
+        'input[type="submit"]',
+        'button[data-testid*="login"]',
+        'button[name="login"]',
+    )
+
+    # Cookie 横幅常见的接受按钮文案兜底。
+    COOKIE_BANNER_BUTTON_NAMES = (
+        "同意",
+        "接受",
+        "Accept",
+        "I agree",
     )
 
     def __init__(self, client: BrowserClient):
@@ -98,11 +114,12 @@ class PixivLoginService:
         不然有可能会挡住输入框或按钮。
         """
         page = self.client.get_page()
-        consent_button = page.get_by_role("button", name="同意", exact=True)
+        consent_button = self._find_cookie_banner_button(page)
+        if consent_button is None:
+            return
 
-        if consent_button.count() and consent_button.first.is_visible():
-            consent_button.first.click()
-            page.wait_for_timeout(800)
+        consent_button.click()
+        page.wait_for_timeout(800)
 
     def _get_login_form(self):
         """
@@ -116,6 +133,71 @@ class PixivLoginService:
         return page.locator("form").filter(
             has=page.locator(self.USERNAME_SELECTOR)
         ).first
+
+    def _find_cookie_banner_button(self, page: Any):
+        """
+        找到最可能的 cookie 同意按钮。
+
+        这里优先尝试一些更通用的结构化选择器，
+        再退回到少量常见文案，尽量降低对页面语言的耦合。
+        """
+        selector_candidates = [
+            'button[id*="accept"]',
+            'button[class*="accept"]',
+            'button[data-testid*="accept"]',
+            'button[aria-label*="Accept"]',
+            'button[aria-label*="accept"]',
+            'button[aria-label*="同意"]',
+        ]
+
+        for selector in selector_candidates:
+            button = page.locator(selector).first
+            if self._locator_is_visible(button):
+                return button
+
+        for name in self.COOKIE_BANNER_BUTTON_NAMES:
+            button = page.get_by_role("button", name=name, exact=True).first
+            if self._locator_is_visible(button):
+                return button
+
+        return None
+
+    def _get_submit_control(self, form: Any):
+        """
+        获取登录表单的提交控件。
+
+        优先使用表单结构里的 submit 控件，只有没找到时才回退到按钮文案。
+        """
+        for selector in self.SUBMIT_CONTROL_SELECTORS:
+            control = form.locator(selector).first
+            if self._locator_exists(control):
+                return control
+
+        fallback_names = ("ログイン", "登录", "登入", "Log in", "Login")
+        for name in fallback_names:
+            control = form.get_by_role("button", name=name, exact=True).first
+            if self._locator_exists(control):
+                return control
+
+        return form.locator("button").first
+
+    def _locator_exists(self, locator: Any) -> bool:
+        """
+        判断 locator 是否至少命中一个节点。
+        """
+        try:
+            return locator.count() > 0
+        except Exception:
+            return False
+
+    def _locator_is_visible(self, locator: Any) -> bool:
+        """
+        判断 locator 当前是否可见。
+        """
+        try:
+            return self._locator_exists(locator) and bool(locator.is_visible())
+        except Exception:
+            return False
 
     def _credentials_ready(self) -> bool:
         """
@@ -159,7 +241,7 @@ class PixivLoginService:
 
         username_input = form.locator(self.USERNAME_SELECTOR)
         password_input = form.locator(self.PASSWORD_SELECTOR)
-        submit_button = form.get_by_role("button", name="ログイン", exact=True)
+        submit_button = self._get_submit_control(form)
 
         username_input.click()
         username_input.fill(settings.pixiv_username)
@@ -276,7 +358,7 @@ class PixivLoginService:
             return fill_result
 
         form = self._get_login_form()
-        submit_button = form.get_by_role("button", name="ログイン", exact=True)
+        submit_button = self._get_submit_control(form)
 
         console_service.show_warning("已自动填写账号密码，正在尝试自动登录...")
         submit_button.click()

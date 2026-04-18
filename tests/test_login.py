@@ -14,6 +14,13 @@ class PixivLoginServiceTestCase(unittest.TestCase):
         service = PixivLoginService(client)
         return service, client, page
 
+    def _build_locator(self, *, count: int = 1, visible: bool = True) -> MagicMock:
+        locator = MagicMock()
+        locator.first = locator
+        locator.count.return_value = count
+        locator.is_visible.return_value = visible
+        return locator
+
     def test_login_automatically_returns_missing_credentials_issue(self) -> None:
         service, _, _ = self._build_service()
 
@@ -29,6 +36,46 @@ class PixivLoginServiceTestCase(unittest.TestCase):
 
         self.assertFalse(result["success"])
         self.assertEqual(result["issue"], "missing_credentials")
+
+    def test_get_submit_control_prefers_structural_submit_selector(self) -> None:
+        service, _, _ = self._build_service()
+        form = MagicMock()
+        submit_locator = self._build_locator()
+        empty_locator = self._build_locator(count=0, visible=False)
+
+        def locate(selector: str) -> MagicMock:
+            if selector == 'button[type="submit"]':
+                return submit_locator
+            return empty_locator
+
+        form.locator.side_effect = locate
+        form.get_by_role.return_value = empty_locator
+
+        submit_control = service._get_submit_control(form)
+
+        self.assertIs(submit_control, submit_locator)
+
+    def test_dismiss_cookie_banner_uses_common_accept_button_name_as_fallback(self) -> None:
+        service, _, page = self._build_service()
+        empty_locator = self._build_locator(count=0, visible=False)
+        accept_button = self._build_locator(count=1, visible=True)
+
+        page.locator.return_value = empty_locator
+
+        def get_button_by_name(*, name: str, exact: bool) -> MagicMock:
+            if name == "Accept" and exact:
+                return accept_button
+            return empty_locator
+
+        page.get_by_role.side_effect = lambda role, name, exact: get_button_by_name(
+            name=name,
+            exact=exact,
+        )
+
+        service._dismiss_cookie_banner()
+
+        accept_button.click.assert_called_once()
+        page.wait_for_timeout.assert_called_once_with(800)
 
     def test_login_automatically_returns_recaptcha_issue_when_blocked(self) -> None:
         service, _, page = self._build_service()
