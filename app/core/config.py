@@ -67,6 +67,17 @@ class Settings(BaseSettings):
     # 图片下载目录。
     download_dir: str = "./data/images"
 
+    # 下载图片时单次请求的超时时间，单位是秒。
+    download_timeout_seconds: float = 60.0
+
+    # 下载图片时最多尝试多少次。
+    # 这里包含第一次请求本身，例如 3 表示“最多 1 次初试 + 2 次重试”。
+    download_retry_attempts: int = 3
+
+    # 下载失败后的基础退避时间，单位是秒。
+    # 实际等待时间会按 1x、2x、4x 指数递增。
+    download_retry_backoff_seconds: float = 1.0
+
     # Playwright 登录状态文件保存位置。
     state_file: str = "./data/state/storage_state.json"
 

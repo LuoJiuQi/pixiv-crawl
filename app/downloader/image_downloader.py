@@ -9,6 +9,7 @@
 """
 
 from pathlib import Path
+import time
 from urllib.parse import quote
 from urllib.parse import urlparse
 
@@ -37,6 +38,7 @@ class PixivImageDownloader:
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/145.0.0.0 Safari/537.36"
     )
+    RETRYABLE_STATUS_CODES = frozenset({408, 429, 500, 502, 503, 504})
 
     def __init__(self, client: BrowserClient, download_dir: str | None = None):
         """
@@ -136,6 +138,102 @@ class PixivImageDownloader:
             host = f"{host}:{parsed.port}"
 
         return f"{parsed.scheme}://{auth}@{host}"
+
+    def _build_http_client(
+        self,
+        headers: dict[str, str],
+        cookies: httpx.Cookies,
+        proxy_url: str | None,
+    ) -> httpx.Client:
+        client_kwargs: dict[str, object] = {
+            "headers": headers,
+            "cookies": cookies,
+            "follow_redirects": True,
+            "timeout": settings.download_timeout_seconds,
+        }
+        if proxy_url:
+            client_kwargs["proxy"] = proxy_url
+
+        return httpx.Client(**client_kwargs)
+
+    def _is_retryable_download_error(self, exc: Exception) -> bool:
+        if isinstance(exc, httpx.HTTPStatusError):
+            return exc.response.status_code in self.RETRYABLE_STATUS_CODES
+
+        return isinstance(exc, httpx.RequestError)
+
+    def _get_retry_delay(self, attempt_index: int) -> float:
+        base_delay = max(0.0, settings.download_retry_backoff_seconds)
+        return base_delay * (2 ** (attempt_index - 1))
+
+    def _remove_file_if_exists(self, path: Path | None) -> None:
+        if path is None:
+            return
+
+        try:
+            path.unlink(missing_ok=True)
+        except TypeError:
+            if path.exists():
+                path.unlink()
+
+    def _download_page_with_retry(
+        self,
+        http_client: httpx.Client,
+        artwork: ArtworkInfo,
+        page_index: int,
+        total_pages: int,
+        url: str,
+    ) -> str:
+        max_attempts = max(1, settings.download_retry_attempts)
+
+        for attempt_index in range(1, max_attempts + 1):
+            temp_output_path: Path | None = None
+
+            try:
+                with http_client.stream("GET", url) as response:
+                    response.raise_for_status()
+
+                    content_type = response.headers.get("content-type", "")
+                    if "image/" not in content_type:
+                        raise RuntimeError(
+                            f"下载结果不是图片内容，作品 ID: {artwork.artwork_id}, URL: {url}"
+                        )
+
+                    # 有些图片地址会跳转，所以这里用最终响应 URL 来重新推断扩展名。
+                    output_path = self._build_output_path(
+                        artwork,
+                        page_index,
+                        str(response.url),
+                        content_type=content_type,
+                        total_pages=total_pages,
+                    )
+                    temp_output_path = output_path.with_name(f"{output_path.name}.part")
+
+                    with temp_output_path.open("wb") as output_file:
+                        for chunk in response.iter_bytes():
+                            if chunk:
+                                output_file.write(chunk)
+
+                    temp_output_path.replace(output_path)
+                    return str(output_path)
+            except Exception as exc:
+                self._remove_file_if_exists(temp_output_path)
+
+                if not self._is_retryable_download_error(exc) or attempt_index >= max_attempts:
+                    raise
+
+                retry_delay = self._get_retry_delay(attempt_index)
+                logger.warning(
+                    "下载作品 %s 第 %s/%s 页失败，%.1f 秒后开始第 %s/%s 次尝试：%s",
+                    artwork.artwork_id,
+                    page_index + 1,
+                    total_pages,
+                    retry_delay,
+                    attempt_index + 1,
+                    max_attempts,
+                    exc,
+                )
+                time.sleep(retry_delay)
 
     def _build_download_plan(self, artwork: ArtworkInfo) -> list[tuple[int, str]]:
         return self.planner.build_download_plan(artwork)
@@ -345,23 +443,7 @@ class PixivImageDownloader:
         proxy_url = self._build_proxy_url()
 
         # 使用 `httpx.Client` 可以复用连接，效率更高。
-        if proxy_url:
-            http_client_context = httpx.Client(
-                headers=headers,
-                cookies=cookies,
-                follow_redirects=True,
-                timeout=60.0,
-                proxy=proxy_url,
-            )
-        else:
-            http_client_context = httpx.Client(
-                headers=headers,
-                cookies=cookies,
-                follow_redirects=True,
-                timeout=60.0,
-            )
-
-        with http_client_context as http_client:
+        with self._build_http_client(headers, cookies, proxy_url) as http_client:
             total_pages = len(download_plan)
             for page_index, url in download_plan:
                 existing_file = self._find_existing_file_for_page(
@@ -373,36 +455,14 @@ class PixivImageDownloader:
                     downloaded_files.append(str(existing_file))
                     continue
 
-                output_path = self._build_output_path(
-                    artwork,
-                    page_index,
-                    url,
-                    total_pages=total_pages,
-                )
-
-                with http_client.stream("GET", url) as response:
-                    response.raise_for_status()
-
-                    content_type = response.headers.get("content-type", "")
-                    if "image/" not in content_type:
-                        raise RuntimeError(
-                            f"下载结果不是图片内容，作品 ID: {artwork.artwork_id}, URL: {url}"
-                        )
-
-                    # 有些图片地址会跳转，所以这里用最终响应 URL 来重新推断扩展名。
-                    output_path = self._build_output_path(
+                downloaded_files.append(
+                    self._download_page_with_retry(
+                        http_client,
                         artwork,
                         page_index,
-                        str(response.url),
-                        content_type=content_type,
-                        total_pages=total_pages,
+                        total_pages,
+                        url,
                     )
-
-                    with output_path.open("wb") as output_file:
-                        for chunk in response.iter_bytes():
-                            if chunk:
-                                output_file.write(chunk)
-
-                downloaded_files.append(str(output_path))
+                )
 
         return downloaded_files
