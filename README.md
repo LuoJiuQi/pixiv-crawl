@@ -79,6 +79,22 @@ VERBOSE_DEBUG_OUTPUT=false
 
 需要排查页面解析或下载异常时，再临时打开这两个开关。
 
+下载相关配置默认如下：
+
+```env
+DOWNLOAD_TIMEOUT_SECONDS=60
+DOWNLOAD_RETRY_ATTEMPTS=3
+DOWNLOAD_RETRY_BACKOFF_SECONDS=1
+```
+
+含义分别是：
+
+- 单次图片请求最多等待 60 秒
+- 单页图片默认最多尝试 3 次
+- 重试退避按 `1s -> 2s -> 4s` 指数递增
+
+如果服务端返回 `429` 且带有 `Retry-After`，下载器会优先遵守服务端给出的等待时间。
+
 ### 3. 启动项目
 
 ```powershell
@@ -131,6 +147,7 @@ python main.py archive-records --status completed --days 30 --limit 100 --format
 - 失败重试不会清空已有标题、作者、下载文件等历史元数据
 - 解析器优先识别当前页真实作品 ID，避免被相关推荐作品串号
 - 下载器支持流式写盘，降低大图下载的内存占用
+- 下载器会对 `429 / 5xx / timeout / 连接抖动` 做有限重试，并优先遵守 `Retry-After`
 - 页面抓取、作者抓取、下载兜底路径带分层诊断日志
 
 ### 任务管理
@@ -209,6 +226,12 @@ docker compose run --rm pixiv-crawl
 
 - `LOG_MAX_BYTES=5242880`
 - `LOG_BACKUP_COUNT=5`
+
+下载层默认还支持有限重试：
+
+- `DOWNLOAD_TIMEOUT_SECONDS=60`
+- `DOWNLOAD_RETRY_ATTEMPTS=3`
+- `DOWNLOAD_RETRY_BACKOFF_SECONDS=1`
 
 调试信息主要看两处：
 
