@@ -71,6 +71,16 @@ class MainInputParsingTestCase(unittest.TestCase):
             },
         )
 
+    def test_parse_runtime_arguments_supports_crawl_following_options(self) -> None:
+        args = parse_runtime_arguments(
+            ["crawl-following", "--limit", "3", "--completed-streak-limit", "15"]
+        )
+
+        self.assertIsNotNone(args)
+        self.assertEqual(args.action, "crawl_following")
+        self.assertEqual(args.following_limit, 3)
+        self.assertEqual(args.completed_streak_limit, 15)
+
     def test_main_stops_when_login_fails(self) -> None:
         mock_client = MagicMock()
         mock_client.state_manager.state_exists.return_value = False
@@ -243,6 +253,213 @@ class MainInputParsingTestCase(unittest.TestCase):
 
         mocked_choose_action.assert_not_called()
         mocked_collect_artwork_ids.assert_not_called()
+        mocked_pause.assert_not_called()
+        mock_client.close.assert_called_once()
+
+    def test_main_routes_history_cli_arguments_without_prompting_for_filters(self) -> None:
+        mock_client = MagicMock()
+        mock_repository = MagicMock()
+
+        with patch("main.BrowserClient", return_value=mock_client), patch(
+            "main.DownloadRecordRepository",
+            return_value=mock_repository,
+        ), patch(
+            "main.configure_logging",
+        ), patch(
+            "main.choose_action"
+        ) as mocked_choose_action, patch(
+            "main.show_history"
+        ) as mocked_show_history, patch(
+            "main.console_service.pause_before_exit"
+        ) as mocked_pause:
+            main.main(["history", "--status", "failed", "--error-type", "timeout", "--limit", "5"])
+
+        mocked_choose_action.assert_not_called()
+        mocked_show_history.assert_called_once_with(
+            mock_repository,
+            status="failed",
+            error_type="timeout",
+            limit=5,
+            prompt_for_filters=False,
+        )
+        mock_client.start.assert_not_called()
+        mocked_pause.assert_not_called()
+        mock_client.close.assert_called_once()
+
+    def test_main_routes_export_failed_cli_arguments_without_prompting(self) -> None:
+        mock_client = MagicMock()
+        mock_repository = MagicMock()
+
+        with patch("main.BrowserClient", return_value=mock_client), patch(
+            "main.DownloadRecordRepository",
+            return_value=mock_repository,
+        ), patch(
+            "main.configure_logging",
+        ), patch(
+            "main.choose_action"
+        ) as mocked_choose_action, patch(
+            "main.export_failed_records"
+        ) as mocked_export_failed_records, patch(
+            "main.console_service.pause_before_exit"
+        ) as mocked_pause:
+            main.main(
+                ["export-failed", "--error-type", "timeout", "--limit", "5", "--format", "txt"]
+            )
+
+        mocked_choose_action.assert_not_called()
+        mocked_export_failed_records.assert_called_once_with(
+            mock_repository,
+            error_type="timeout",
+            limit=5,
+            file_format="txt",
+            interactive=False,
+        )
+        mock_client.start.assert_not_called()
+        mocked_pause.assert_not_called()
+        mock_client.close.assert_called_once()
+
+    def test_main_routes_archive_records_cli_arguments_without_prompting(self) -> None:
+        mock_client = MagicMock()
+        mock_repository = MagicMock()
+
+        with patch("main.BrowserClient", return_value=mock_client), patch(
+            "main.DownloadRecordRepository",
+            return_value=mock_repository,
+        ), patch(
+            "main.configure_logging",
+        ), patch(
+            "main.choose_action"
+        ) as mocked_choose_action, patch(
+            "main.archive_old_records"
+        ) as mocked_archive_old_records, patch(
+            "main.console_service.pause_before_exit"
+        ) as mocked_pause:
+            main.main(
+                [
+                    "archive-records",
+                    "--status",
+                    "failed",
+                    "--days",
+                    "30",
+                    "--limit",
+                    "5",
+                    "--format",
+                    "txt",
+                    "--yes",
+                ]
+            )
+
+        mocked_choose_action.assert_not_called()
+        mocked_archive_old_records.assert_called_once_with(
+            mock_repository,
+            status="failed",
+            days=30,
+            limit=5,
+            file_format="txt",
+            interactive=False,
+            confirmed=True,
+        )
+        mock_client.start.assert_not_called()
+        mocked_pause.assert_not_called()
+        mock_client.close.assert_called_once()
+
+    def test_main_routes_retry_failed_cli_arguments_without_prompting(self) -> None:
+        mock_client = MagicMock()
+        mock_client.state_manager.state_exists.return_value = True
+
+        mock_repository = MagicMock()
+        mock_login_service = MagicMock()
+        mock_login_service.is_logged_in.return_value = True
+        summary = {"success_results": [], "failed_results": []}
+
+        with patch("main.BrowserClient", return_value=mock_client), patch(
+            "main.DownloadRecordRepository",
+            return_value=mock_repository,
+        ), patch("main.PixivLoginService", return_value=mock_login_service), patch(
+            "main.configure_logging",
+        ), patch(
+            "main.choose_action"
+        ) as mocked_choose_action, patch(
+            "main.collect_retry_artwork_ids",
+            return_value=["100"],
+        ) as mocked_collect_retry_artwork_ids, patch(
+            "main.process_artwork_batch",
+            return_value=summary,
+        ) as mocked_process_artwork_batch, patch(
+            "main.console_service.show_batch_summary"
+        ), patch(
+            "main.console_service.pause_before_exit"
+        ) as mocked_pause:
+            main.main(["retry-failed", "--error-type", "timeout", "--limit", "5"])
+
+        mocked_choose_action.assert_not_called()
+        mocked_collect_retry_artwork_ids.assert_called_once_with(
+            mock_repository,
+            error_type="timeout",
+            limit=5,
+            interactive=False,
+        )
+        mocked_process_artwork_batch.assert_called_once()
+        mocked_pause.assert_not_called()
+        mock_client.close.assert_called_once()
+
+    def test_main_routes_crawl_following_cli_arguments_without_prompting(self) -> None:
+        mock_client = MagicMock()
+        mock_client.state_manager.state_exists.return_value = True
+
+        mock_repository = MagicMock()
+        mock_login_service = MagicMock()
+        mock_login_service.is_logged_in.return_value = True
+        mock_author_crawler = MagicMock()
+        mock_author_crawler.collect_following_user_ids.return_value = ["123"]
+        mock_author_crawler.collect_author_artwork_ids.return_value = ["100"]
+        summary = {"success_results": [], "failed_results": []}
+        selection = {
+            "total_available_artwork_count": 1,
+            "scanned_artwork_count": 1,
+            "new_artwork_ids": ["100"],
+            "retry_artwork_ids": [],
+            "skipped_completed_ids": [],
+            "candidate_artwork_ids": ["100"],
+            "stopped_early": False,
+            "stop_after_completed_streak": 15,
+        }
+
+        with patch("main.BrowserClient", return_value=mock_client), patch(
+            "main.DownloadRecordRepository",
+            return_value=mock_repository,
+        ), patch("main.PixivLoginService", return_value=mock_login_service), patch(
+            "main.AuthorCrawler",
+            return_value=mock_author_crawler,
+        ), patch(
+            "main.configure_logging",
+        ), patch(
+            "main.choose_action"
+        ) as mocked_choose_action, patch(
+            "main.select_incremental_artwork_ids",
+            return_value=selection,
+        ) as mocked_select_incremental_artwork_ids, patch(
+            "main.process_artwork_batch",
+            return_value=summary,
+        ) as mocked_process_artwork_batch, patch(
+            "main.console_service.show_incremental_selection_summary"
+        ), patch(
+            "main.console_service.show_batch_summary"
+        ), patch(
+            "main.console_service.show_following_update_summary"
+        ), patch(
+            "main.console_service.pause_before_exit"
+        ) as mocked_pause:
+            main.main(["crawl-following", "--limit", "3", "--completed-streak-limit", "15"])
+
+        mocked_choose_action.assert_not_called()
+        mock_author_crawler.collect_following_user_ids.assert_called_once_with(limit=3)
+        mocked_select_incremental_artwork_ids.assert_called_once_with(
+            ["100"],
+            mock_repository,
+            completed_streak_limit=15,
+        )
+        mocked_process_artwork_batch.assert_called_once()
         mocked_pause.assert_not_called()
         mock_client.close.assert_called_once()
 
