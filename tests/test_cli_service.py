@@ -86,7 +86,11 @@ class CliServiceTestCase(unittest.TestCase):
 
         with patch(
             "app.services.cli_service.collect_history_options"
-        ) as mocked_collect_history_options:
+        ) as mocked_collect_history_options, patch(
+            "app.services.cli_service.console_service.show_summary"
+        ), patch(
+            "app.services.cli_service.console_service.show_records"
+        ):
             show_history(
                 mock_repository,
                 status="failed",
@@ -123,7 +127,11 @@ class CliServiceTestCase(unittest.TestCase):
             {"artwork_id": "200"},
         ]
 
-        with patch("app.services.cli_service.console_service.prompt") as mocked_prompt:
+        with patch("app.services.cli_service.console_service.prompt") as mocked_prompt, patch(
+            "app.services.cli_service.console_service.show_summary"
+        ), patch(
+            "app.services.cli_service.console_service.show_list"
+        ):
             artwork_ids = collect_retry_artwork_ids(
                 mock_repository,
                 error_type="timeout",
@@ -146,6 +154,10 @@ class CliServiceTestCase(unittest.TestCase):
         mock_repository.list_records.return_value = [{"artwork_id": "100"}]
 
         with patch("app.services.cli_service.console_service.prompt") as mocked_prompt, patch(
+            "app.services.cli_service.console_service.show_summary"
+        ), patch(
+            "app.services.cli_service.console_service.show_success"
+        ), patch(
             "app.services.cli_service.build_failure_export_path",
             return_value=Path("data/exports/failed_timeout.txt"),
         ) as mocked_build_path, patch(
@@ -184,6 +196,12 @@ class CliServiceTestCase(unittest.TestCase):
         fixed_now = datetime(2026, 4, 20, 12, 0, 0)
 
         with patch("app.services.cli_service.console_service.prompt") as mocked_prompt, patch(
+            "app.services.cli_service.console_service.show_summary"
+        ), patch(
+            "app.services.cli_service.console_service.show_list"
+        ), patch(
+            "app.services.cli_service.console_service.show_success"
+        ), patch(
             "app.services.cli_service.datetime"
         ) as mocked_datetime, patch(
             "app.services.cli_service.build_record_export_path",
