@@ -10,6 +10,7 @@
 
 from pathlib import Path
 import time
+from email.utils import parsedate_to_datetime
 from urllib.parse import quote
 from urllib.parse import urlparse
 
@@ -162,7 +163,32 @@ class PixivImageDownloader:
 
         return isinstance(exc, httpx.RequestError)
 
-    def _get_retry_delay(self, attempt_index: int) -> float:
+    def _parse_retry_after_seconds(self, retry_after_value: str | None) -> float | None:
+        raw_value = (retry_after_value or "").strip()
+        if not raw_value:
+            return None
+
+        try:
+            return max(0.0, float(raw_value))
+        except ValueError:
+            pass
+
+        try:
+            retry_at = parsedate_to_datetime(raw_value)
+        except (TypeError, ValueError, IndexError, OverflowError):
+            return None
+
+        retry_delay = (retry_at.timestamp() - time.time())
+        return max(0.0, retry_delay)
+
+    def _get_retry_delay(self, attempt_index: int, exc: Exception) -> float:
+        if isinstance(exc, httpx.HTTPStatusError):
+            retry_after_seconds = self._parse_retry_after_seconds(
+                exc.response.headers.get("retry-after")
+            )
+            if retry_after_seconds is not None:
+                return retry_after_seconds
+
         base_delay = max(0.0, settings.download_retry_backoff_seconds)
         return base_delay * (2 ** (attempt_index - 1))
 
@@ -222,7 +248,7 @@ class PixivImageDownloader:
                 if not self._is_retryable_download_error(exc) or attempt_index >= max_attempts:
                     raise
 
-                retry_delay = self._get_retry_delay(attempt_index)
+                retry_delay = self._get_retry_delay(attempt_index, exc)
                 logger.warning(
                     "下载作品 %s 第 %s/%s 页失败，%.1f 秒后开始第 %s/%s 次尝试：%s",
                     artwork.artwork_id,

@@ -339,6 +339,80 @@ class PixivImageDownloaderTestCase(unittest.TestCase):
         self.assertEqual(SequencedHttpClient.instances[0].requests, [("GET", artwork.possible_image_urls[0])] * 2)
         mocked_sleep.assert_called_once_with(0.25)
 
+    def test_download_artwork_prefers_retry_after_header_for_rate_limit(self) -> None:
+        artwork = ArtworkInfo(
+            artwork_id="123456789",
+            user_id="998877",
+            author_name="mignon",
+            title="制服まとめ",
+            page_count=1,
+            canonical_url="https://www.pixiv.net/artworks/123456789",
+            possible_image_urls=[
+                "https://i.pximg.net/img-original/img/2026/03/20/15/42/15/123456789_p0.jpg",
+            ],
+        )
+
+        class SequencedResponse:
+            def __init__(self, outcome: str) -> None:
+                self.outcome = outcome
+                self.headers = {"content-type": "image/jpeg"}
+                self.url = artwork.possible_image_urls[0]
+
+            def raise_for_status(self) -> None:
+                if self.outcome == "429":
+                    request = httpx.Request("GET", self.url)
+                    response = httpx.Response(429, headers={"retry-after": "3"}, request=request)
+                    raise httpx.HTTPStatusError("rate limited", request=request, response=response)
+
+            def iter_bytes(self) -> list[bytes]:
+                return [b"ok"]
+
+        class SequencedStreamContext:
+            def __init__(self, response: SequencedResponse):
+                self.response = response
+
+            def __enter__(self):
+                return self.response
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class SequencedHttpClient:
+            def __init__(self, **kwargs):
+                self.kwargs = kwargs
+                self.outcomes = ["429", "success"]
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def stream(self, method: str, url: str):
+                return SequencedStreamContext(SequencedResponse(self.outcomes.pop(0)))
+
+        with TemporaryDirectory() as temp_dir:
+            downloader = StreamFriendlyDownloader(make_dummy_client(), download_dir=temp_dir)
+
+            with patch("app.downloader.image_downloader.httpx.Client", SequencedHttpClient), patch(
+                "app.downloader.image_downloader.time.sleep"
+            ) as mocked_sleep, patch.object(
+                settings,
+                "download_retry_attempts",
+                3,
+            ), patch.object(
+                settings,
+                "download_retry_backoff_seconds",
+                0.25,
+            ):
+                downloaded_files = downloader.download_artwork(artwork)
+
+            saved_path = Path(downloaded_files[0])
+            saved_bytes = saved_path.read_bytes()
+
+        self.assertEqual(saved_bytes, b"ok")
+        mocked_sleep.assert_called_once_with(3.0)
+
     def test_download_artwork_retries_request_errors_until_exhausted(self) -> None:
         artwork = ArtworkInfo(
             artwork_id="123456789",
