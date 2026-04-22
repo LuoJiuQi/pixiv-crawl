@@ -11,26 +11,77 @@
 方便后面查看历史记录、筛选问题和决定优先排查方向。
 """
 
+import re
 
-def classify_failure(error_message: str) -> str:
+import httpx
+
+
+def _classify_http_status(status_code: int) -> str:
+    if status_code == 429:
+        return "rate_limit"
+    if 500 <= status_code <= 599:
+        return "http_5xx"
+    if status_code in {401, 403, 404, 410, 451}:
+        return "artwork_unavailable"
+    return "network"
+
+
+def classify_failure(error: str | BaseException) -> str:
     """
     根据报错文本，归类出一个较稳定的错误类型。
 
     当前分类是偏实用型的：
     - login
+    - rate_limit
+    - http_5xx
     - timeout
     - artwork_unavailable
     - download
-    - parse
     - network
+    - parse
     - input
     - browser
     - unknown
     """
-    normalized = error_message.strip().lower()
+    if isinstance(error, httpx.HTTPStatusError):
+        return _classify_http_status(error.response.status_code)
+
+    if isinstance(error, httpx.TimeoutException):
+        return "timeout"
+
+    if isinstance(error, httpx.RequestError):
+        return "network"
+
+    normalized = str(error).strip().lower()
 
     if not normalized:
         return "unknown"
+
+    if any(
+        keyword in normalized
+        for keyword in (
+            "429",
+            "too many requests",
+            "rate limit",
+            "rate limited",
+            "retry-after",
+            "限流",
+            "请求过多",
+        )
+    ):
+        return "rate_limit"
+
+    if any(
+        keyword in normalized
+        for keyword in (
+            "internal server error",
+            "bad gateway",
+            "service unavailable",
+            "gateway timeout",
+            "server unavailable",
+        )
+    ) or re.search(r"\b5\d\d\b", normalized):
+        return "http_5xx"
 
     if any(keyword in normalized for keyword in ("timeout", "超时")):
         return "timeout"

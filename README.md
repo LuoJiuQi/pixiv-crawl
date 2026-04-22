@@ -123,8 +123,8 @@ python main.py
 python main.py crawl 142463788 https://www.pixiv.net/artworks/142543623
 python main.py crawl-author https://www.pixiv.net/users/123456 --update-mode incremental --completed-streak-limit 10
 python main.py crawl-following --limit 20 --completed-streak-limit 10
-python main.py retry-failed --error-type timeout --limit 50
-python main.py history --status failed --error-type timeout --limit 20
+python main.py retry-failed --error-type rate_limit --limit 50
+python main.py history --status failed --error-type http_5xx --limit 20
 python main.py export-failed --error-type download --format json
 python main.py archive-records --status completed --days 30 --limit 100 --format json --yes
 ```
@@ -158,6 +158,17 @@ python main.py archive-records --status completed --days 30 --limit 100 --format
 - 按失败类型筛选和重试
 - 导出失败清单
 - 归档旧记录
+
+常见失败类型包括：
+
+- `login`：登录态、账号密码或验证码相关问题
+- `rate_limit`：服务端限流，例如 HTTP 429
+- `http_5xx`：服务端临时错误，例如 HTTP 500 / 502 / 503 / 504
+- `timeout`：等待或网络请求超时
+- `network`：代理、DNS、连接、TLS 等网络层错误
+- `download`：未找到可下载图片或响应内容不是图片
+- `artwork_unavailable`：作品不存在、不可见、已删除或无权限访问
+- `parse`：页面结构或 JSON 解析失败
 
 ## 🔄 工作流
 

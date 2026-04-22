@@ -4,6 +4,8 @@ from tempfile import TemporaryDirectory
 from typing import cast
 from unittest.mock import patch
 
+import httpx
+
 from app.db.download_record_repository import DownloadRecord, DownloadRecordRepository
 from app.services import task_service
 from app.services.task_service import process_artwork, process_artwork_batch, select_incremental_artwork_ids
@@ -244,6 +246,38 @@ class TaskServiceTestCase(unittest.TestCase):
                 "skipped_by_db": True,
             },
         )
+
+    def test_process_artwork_batch_marks_http_429_as_rate_limit(self) -> None:
+        request = httpx.Request("GET", "https://i.pximg.net/image.jpg")
+        response = httpx.Response(429, request=request)
+        rate_limit_error = httpx.HTTPStatusError(
+            "rate limited",
+            request=request,
+            response=response,
+        )
+
+        with TemporaryDirectory() as temp_dir:
+            repository = DownloadRecordRepository(f"{temp_dir}/pixiv.db")
+            repository.initialize()
+
+            with patch("app.services.task_service.process_artwork", side_effect=rate_limit_error), patch.object(
+                task_service,
+                "logger",
+            ):
+                summary = process_artwork_batch(
+                    ["100"],
+                    crawler=object(),
+                    downloader=object(),
+                    record_repository=repository,
+                )
+
+            record = repository.get_record("100")
+
+        self.assertEqual(len(summary["failed_results"]), 1)
+        self.assertIsNotNone(record)
+        record = cast(DownloadRecord, record)
+        self.assertEqual(record["status"], "failed")
+        self.assertEqual(record["error_type"], "rate_limit")
 
     def test_process_artwork_skips_debug_artifacts_when_disabled(self) -> None:
         fake_info = type(

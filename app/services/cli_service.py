@@ -217,7 +217,7 @@ def collect_history_options() -> tuple[str | None, str | None, int]:
     error_type = None
     if status in {None, "failed"}:
         raw_error_type = console_service.prompt(
-            "按失败类型筛选（all/login/timeout/download/...，直接回车默认 all）："
+            "按失败类型筛选（all/login/rate_limit/http_5xx/timeout/network/download/...，直接回车默认 all）："
         ).strip().lower()
         if raw_error_type and raw_error_type != "all":
             error_type = raw_error_type

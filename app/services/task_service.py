@@ -448,7 +448,7 @@ def process_artwork_batch(
             logger.debug("作品 %s 处理完成。", artwork_id)
         except Exception as exc:
             error_message = str(exc)
-            error_type = classify_failure(error_message)
+            error_type = classify_failure(exc)
             failed_result: FailedResult = {
                 "artwork_id": artwork_id,
                 "error": error_message,
