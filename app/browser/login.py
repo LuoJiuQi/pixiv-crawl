@@ -42,6 +42,7 @@ class PixivLoginService:
 
     LOGIN_URL = "https://accounts.pixiv.net/login"
     HOME_URL = "https://www.pixiv.net/"
+    LOGIN_CHECK_URL = "https://www.pixiv.net/settings/profile"
 
     # 当前登录页里比较稳定的定位方式。
     USERNAME_SELECTOR = 'input[autocomplete*="username"]'
@@ -217,6 +218,22 @@ class PixivLoginService:
             return False
         return any(hint in body_text for hint in self.RECAPTCHA_HINTS)
 
+    def _has_visible_login_form(self) -> bool:
+        """
+        判断当前页面是否展示了登录表单。
+
+        不能只靠 URL 判断登录态，因为 Pixiv 的公开首页和部分作品页
+        在未登录时也能正常访问。
+        """
+        page = self.client.get_page()
+        try:
+            username_input = page.locator(self.USERNAME_SELECTOR).first
+            password_input = page.locator(self.PASSWORD_SELECTOR).first
+            return self._locator_is_visible(username_input) or self._locator_is_visible(password_input)
+        except Exception:
+            logger.debug("检查登录表单失败，暂时按未发现登录表单处理。", exc_info=True)
+            return False
+
     def _fill_login_form(self) -> LoginResult:
         """
         自动填写账号密码，并确认提交按钮是否可点。
@@ -348,7 +365,7 @@ class PixivLoginService:
 
         # 如果访问登录页后直接被重定向回 Pixiv 主站，
         # 说明当前上下文其实已经是登录状态了。
-        if "accounts.pixiv.net" not in page.url and "pixiv.net" in page.url:
+        if "accounts.pixiv.net" not in page.url and self.is_logged_in():
             return self._build_result(success=True)
 
         self._dismiss_cookie_banner()
@@ -392,9 +409,10 @@ class PixivLoginService:
         page = self.client.get_page()
 
         try:
-            page.goto(self.HOME_URL, wait_until="domcontentloaded")
+            page.goto(self.LOGIN_CHECK_URL, wait_until="domcontentloaded")
+            page.wait_for_timeout(1000)
         except Exception as e:
-            logger.warning("访问 Pixiv 首页失败：%s", e)
+            logger.warning("访问 Pixiv 登录态检查页失败：%s", e)
             return False
 
         current_url = page.url
@@ -402,7 +420,10 @@ class PixivLoginService:
         if "accounts.pixiv.net" in current_url:
             return False
 
-        if "pixiv.net" in current_url:
+        if self._has_visible_login_form():
+            return False
+
+        if "pixiv.net/settings" in current_url:
             return True
 
         return False

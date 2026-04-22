@@ -191,6 +191,48 @@ class PixivLoginServiceTestCase(unittest.TestCase):
         self.assertFalse(result)
         mocked_logger.warning.assert_called_once()
 
+    def test_is_logged_in_returns_true_on_settings_page_without_login_form(self) -> None:
+        service, _, page = self._build_service()
+        page.url = "https://www.pixiv.net/settings/profile"
+        invisible_locator = self._build_locator(count=0, visible=False)
+        page.locator.return_value = invisible_locator
+
+        result = service.is_logged_in()
+
+        self.assertTrue(result)
+        page.goto.assert_called_once_with(
+            "https://www.pixiv.net/settings/profile",
+            wait_until="domcontentloaded",
+        )
+
+    def test_is_logged_in_returns_false_when_redirected_to_login_page(self) -> None:
+        service, _, page = self._build_service()
+        page.url = "https://accounts.pixiv.net/login"
+
+        result = service.is_logged_in()
+
+        self.assertFalse(result)
+
+    def test_is_logged_in_returns_false_for_public_pixiv_page(self) -> None:
+        service, _, page = self._build_service()
+        page.url = "https://www.pixiv.net/"
+        invisible_locator = self._build_locator(count=0, visible=False)
+        page.locator.return_value = invisible_locator
+
+        result = service.is_logged_in()
+
+        self.assertFalse(result)
+
+    def test_is_logged_in_returns_false_when_login_form_is_visible(self) -> None:
+        service, _, page = self._build_service()
+        page.url = "https://www.pixiv.net/settings/profile"
+        visible_locator = self._build_locator(count=1, visible=True)
+        page.locator.return_value = visible_locator
+
+        result = service.is_logged_in()
+
+        self.assertFalse(result)
+
     def test_has_recaptcha_prompt_returns_false_and_logs_debug_when_body_read_fails(self) -> None:
         service, _, page = self._build_service()
         page.locator.return_value.inner_text.side_effect = RuntimeError("dom not ready")
