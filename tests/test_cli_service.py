@@ -1,8 +1,10 @@
 import unittest
 from datetime import datetime
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import MagicMock, patch
 
+from app.db.download_record_repository import DownloadRecordRepository
 from app.services.cli_service import (
     archive_old_records,
     choose_action,
@@ -106,6 +108,31 @@ class CliServiceTestCase(unittest.TestCase):
             error_type="timeout",
         )
 
+    def test_show_history_replays_http_5xx_filter_against_real_repository(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repository = DownloadRecordRepository(f"{temp_dir}/pixiv.db")
+            repository.initialize()
+            repository.upsert_record("100", status="failed", error_type="http_5xx", error_message="503")
+            repository.upsert_record("200", status="failed", error_type="rate_limit", error_message="429")
+            repository.upsert_record("300", status="failed", error_type="timeout", error_message="timed out")
+
+            with patch(
+                "app.services.cli_service.console_service.show_summary"
+            ), patch(
+                "app.services.cli_service.console_service.show_records"
+            ) as mocked_show_records:
+                show_history(
+                    repository,
+                    status="failed",
+                    error_type="http_5xx",
+                    limit=10,
+                    prompt_for_filters=False,
+                )
+
+        mocked_show_records.assert_called_once()
+        shown_records = mocked_show_records.call_args.args[1]
+        self.assertEqual([record["artwork_id"] for record in shown_records], ["100"])
+
     def test_collect_retry_artwork_ids_shows_empty_failed_hint_via_console(self) -> None:
         mock_repository = MagicMock()
         mock_repository.get_status_summary.return_value = {"failed": 0}
@@ -146,6 +173,28 @@ class CliServiceTestCase(unittest.TestCase):
             status="failed",
             error_type="timeout",
         )
+
+    def test_collect_retry_artwork_ids_replays_rate_limit_filter_against_real_repository(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repository = DownloadRecordRepository(f"{temp_dir}/pixiv.db")
+            repository.initialize()
+            repository.upsert_record("100", status="failed", error_type="rate_limit", error_message="429")
+            repository.upsert_record("200", status="failed", error_type="http_5xx", error_message="503")
+            repository.upsert_record("300", status="failed", error_type="rate_limit", error_message="429")
+
+            with patch(
+                "app.services.cli_service.console_service.show_summary"
+            ), patch(
+                "app.services.cli_service.console_service.show_list"
+            ):
+                artwork_ids = collect_retry_artwork_ids(
+                    repository,
+                    error_type="rate_limit",
+                    limit=10,
+                    interactive=False,
+                )
+
+        self.assertEqual(artwork_ids, ["300", "100"])
 
     def test_export_failed_records_uses_noninteractive_arguments_without_prompting(self) -> None:
         mock_repository = MagicMock()

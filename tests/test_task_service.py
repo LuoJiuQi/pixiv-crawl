@@ -279,6 +279,62 @@ class TaskServiceTestCase(unittest.TestCase):
         self.assertEqual(record["status"], "failed")
         self.assertEqual(record["error_type"], "rate_limit")
 
+    def test_process_artwork_batch_replays_real_failure_samples_into_retryable_buckets(self) -> None:
+        rate_limit_request = httpx.Request("GET", "https://i.pximg.net/rate-limit.jpg")
+        rate_limit_response = httpx.Response(429, request=rate_limit_request)
+        rate_limit_error = httpx.HTTPStatusError(
+            "rate limited",
+            request=rate_limit_request,
+            response=rate_limit_response,
+        )
+
+        http_5xx_request = httpx.Request("GET", "https://i.pximg.net/server-error.jpg")
+        http_5xx_response = httpx.Response(503, request=http_5xx_request)
+        http_5xx_error = httpx.HTTPStatusError(
+            "server unavailable",
+            request=http_5xx_request,
+            response=http_5xx_response,
+        )
+
+        timeout_request = httpx.Request("GET", "https://i.pximg.net/timeout.jpg")
+        timeout_error = httpx.ReadTimeout("timed out", request=timeout_request)
+
+        with TemporaryDirectory() as temp_dir:
+            repository = DownloadRecordRepository(f"{temp_dir}/pixiv.db")
+            repository.initialize()
+
+            with patch(
+                "app.services.task_service.process_artwork",
+                side_effect=[rate_limit_error, http_5xx_error, timeout_error],
+            ), patch.object(task_service, "logger"):
+                summary = process_artwork_batch(
+                    ["100", "200", "300"],
+                    crawler=object(),
+                    downloader=object(),
+                    record_repository=repository,
+                )
+
+            rate_limit_records = repository.list_records(
+                limit=10,
+                status="failed",
+                error_type="rate_limit",
+            )
+            http_5xx_records = repository.list_records(
+                limit=10,
+                status="failed",
+                error_type="http_5xx",
+            )
+            timeout_records = repository.list_records(
+                limit=10,
+                status="failed",
+                error_type="timeout",
+            )
+
+        self.assertEqual(len(summary["failed_results"]), 3)
+        self.assertEqual([record["artwork_id"] for record in rate_limit_records], ["100"])
+        self.assertEqual([record["artwork_id"] for record in http_5xx_records], ["200"])
+        self.assertEqual([record["artwork_id"] for record in timeout_records], ["300"])
+
     def test_process_artwork_skips_debug_artifacts_when_disabled(self) -> None:
         fake_info = type(
             "FakeArtworkInfo",
