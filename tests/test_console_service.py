@@ -49,6 +49,12 @@ class ConsoleServiceTestCase(unittest.TestCase):
 
         mocked_input.assert_called_once_with("按回车键关闭浏览器...")
 
+    def test_show_json_prints_pretty_json_without_ascii_escaping(self) -> None:
+        with patch("builtins.print") as mocked_print:
+            console_service.show_json({"message": "环境正常", "ok": True})
+
+        mocked_print.assert_called_once_with('{\n  "message": "环境正常",\n  "ok": true\n}')
+
 
 if __name__ == "__main__":
     unittest.main()

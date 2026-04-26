@@ -7,6 +7,7 @@
 - 交互提示
 """
 
+import json
 from typing import TYPE_CHECKING
 from collections.abc import Iterable, Mapping, Sequence
 
@@ -143,6 +144,10 @@ def show_doctor_report(report: "DoctorReport") -> None:
     show_section("运行环境自检")
     for check in report["checks"]:
         print(f"[{check['status'].upper()}] {check['name']}：{check['detail']}")
+
+
+def show_json(payload: object) -> None:
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
 
 
 def show_warning(message: str) -> None:

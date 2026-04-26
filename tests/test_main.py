@@ -94,6 +94,13 @@ class MainInputParsingTestCase(unittest.TestCase):
         self.assertEqual(args.action, "doctor")
         self.assertTrue(args.strict)
 
+    def test_parse_runtime_arguments_supports_doctor_json_output(self) -> None:
+        args = parse_runtime_arguments(["doctor", "--json"])
+
+        self.assertIsNotNone(args)
+        self.assertEqual(args.action, "doctor")
+        self.assertTrue(args.json_output)
+
     def test_main_stops_when_login_fails(self) -> None:
         mock_client = MagicMock()
         mock_client.state_manager.state_exists.return_value = False
@@ -380,6 +387,55 @@ class MainInputParsingTestCase(unittest.TestCase):
         mocked_get_exit_code.assert_called_once_with(report, strict=True)
         self.assertEqual(exit_code, 1)
         mocked_pause.assert_not_called()
+        mock_repository.initialize.assert_not_called()
+        mock_client.close.assert_called_once()
+
+    def test_main_routes_doctor_json_output_without_human_summary(self) -> None:
+        mock_client = MagicMock()
+        mock_repository = MagicMock()
+        report = {
+            "checks": [
+                {"name": "浏览器启动", "status": "ok", "detail": "ok"},
+                {"name": "登录态有效性", "status": "skip", "detail": "missing"},
+            ]
+        }
+        summary = {"ok": 1, "warn": 0, "error": 0, "skip": 1}
+
+        with patch("main.BrowserClient", return_value=mock_client), patch(
+            "main.DownloadRecordRepository",
+            return_value=mock_repository,
+        ), patch(
+            "main.configure_logging",
+        ), patch(
+            "main.run_doctor",
+            return_value=report,
+        ), patch(
+            "main.summarize_doctor_report",
+            return_value=summary,
+        ), patch(
+            "main.get_doctor_exit_code",
+            return_value=0,
+        ) as mocked_get_exit_code, patch(
+            "main.console_service.show_json"
+        ) as mocked_show_json, patch(
+            "main.console_service.show_doctor_report"
+        ) as mocked_show_doctor_report, patch(
+            "main.console_service.show_summary"
+        ) as mocked_show_summary:
+            exit_code = main.main(["doctor", "--json"])
+
+        mocked_get_exit_code.assert_called_once_with(report, strict=False)
+        mocked_show_json.assert_called_once_with(
+            {
+                "checks": report["checks"],
+                "summary": summary,
+                "strict": False,
+                "exit_code": 0,
+            }
+        )
+        mocked_show_doctor_report.assert_not_called()
+        mocked_show_summary.assert_not_called()
+        self.assertEqual(exit_code, 0)
         mock_repository.initialize.assert_not_called()
         mock_client.close.assert_called_once()
 

@@ -152,6 +152,12 @@ def build_argument_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="将 warning 也视为失败，返回非 0 退出码。",
     )
+    doctor_parser.add_argument(
+        "--json",
+        action="store_true",
+        dest="json_output",
+        help="以 JSON 输出自检结果，适合脚本或 CI 消费。",
+    )
 
     return parser
 
@@ -250,13 +256,23 @@ def main(argv: list[str] | None = None) -> int | None:
         action = runtime_args.action if runtime_args else choose_action()
         if action == "doctor":
             report = run_doctor()
-            console_service.show_doctor_report(report)
             summary = summarize_doctor_report(report)
-            console_service.show_summary("自检结果汇总", list(summary.items()))
             exit_code = get_doctor_exit_code(
                 report,
                 strict=bool(runtime_args.strict) if runtime_args else False,
             )
+            if runtime_args and runtime_args.json_output:
+                console_service.show_json(
+                    {
+                        "checks": report["checks"],
+                        "summary": summary,
+                        "strict": bool(runtime_args.strict),
+                        "exit_code": exit_code,
+                    }
+                )
+            else:
+                console_service.show_doctor_report(report)
+                console_service.show_summary("自检结果汇总", list(summary.items()))
             if interactive_mode:
                 console_service.pause_before_exit()
             return exit_code
