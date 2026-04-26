@@ -251,6 +251,7 @@ def main(argv: list[str] | None = None) -> int | None:
     换句话说，这里尽量只做“安排工作”，
     不做太多具体实现细节。
     """
+    console_service.configure_console_encoding()
     configure_logging()
     client = BrowserClient()
     record_repository = DownloadRecordRepository()

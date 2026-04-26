@@ -145,6 +145,34 @@ class MainInputParsingTestCase(unittest.TestCase):
         mocked_logger.error.assert_called_once_with("登录未完成，程序结束。")
         mock_client.close.assert_called_once()
 
+    def test_main_configures_console_encoding_before_logging(self) -> None:
+        mock_client = MagicMock()
+        mock_client.state_manager.state_exists.return_value = False
+        mock_repository = MagicMock()
+        mock_login_service = MagicMock()
+        mock_login_service.login_and_save_state.return_value = {
+            "success": False,
+            "issue": "headless_manual_required",
+            "requires_manual_action": False,
+            "state_saved": False,
+        }
+
+        with patch("main.BrowserClient", return_value=mock_client), patch(
+            "main.DownloadRecordRepository",
+            return_value=mock_repository,
+        ), patch("main.PixivLoginService", return_value=mock_login_service), patch(
+            "main.console_service.configure_console_encoding",
+        ) as mocked_configure_console_encoding, patch(
+            "main.configure_logging",
+        ) as mocked_configure_logging, patch(
+            "main.choose_action",
+            return_value="crawl",
+        ), patch("main.collect_artwork_ids", return_value=["100"]):
+            main.main()
+
+        mocked_configure_console_encoding.assert_called_once()
+        mocked_configure_logging.assert_called_once()
+
     def test_main_uses_console_pause_before_exit_after_batch(self) -> None:
         mock_client = MagicMock()
         mock_client.state_manager.state_exists.return_value = True

@@ -8,7 +8,9 @@
 """
 
 import json
+import sys
 from pathlib import Path
+from io import TextIOBase
 from typing import TYPE_CHECKING
 from collections.abc import Iterable, Mapping, Sequence
 
@@ -18,46 +20,86 @@ if TYPE_CHECKING:
     from app.services.doctor_service import DoctorReport
 
 
+def configure_console_encoding() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if not callable(reconfigure):
+            continue
+
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, OSError, ValueError):
+            continue
+
+
+def _emit_text(text: str, *, end: str = "\n") -> None:
+    try:
+        if end == "\n":
+            print(text)
+        else:
+            print(text, end=end)
+    except UnicodeEncodeError:
+        _write_text_fallback(text + end, stream=sys.stdout)
+
+
+def _write_text_fallback(text: str, *, stream: TextIOBase) -> None:
+    encoding = getattr(stream, "encoding", None) or "utf-8"
+    payload = text.encode(encoding, errors="backslashreplace")
+    buffer = getattr(stream, "buffer", None)
+
+    if buffer is not None:
+        buffer.write(payload)
+        flush = getattr(buffer, "flush", None)
+        if callable(flush):
+            flush()
+        return
+
+    stream.write(payload.decode(encoding, errors="ignore"))
+    flush = getattr(stream, "flush", None)
+    if callable(flush):
+        flush()
+
+
 def show_menu(options: list[str]) -> None:
-    print("请选择操作：")
+    _emit_text("请选择操作：")
     for index, option in enumerate(options, start=1):
-        print(f"{index}. {option}")
+        _emit_text(f"{index}. {option}")
 
 
 def show_section(title: str) -> None:
-    print()
-    print(f"========== {title} ==========")
+    _emit_text("")
+    _emit_text(f"========== {title} ==========")
 
 
 def show_summary(title: str, rows: list[tuple[str, object]]) -> None:
-    print(f"{title}：")
+    _emit_text(f"{title}：")
     for key, value in rows:
-        print(f"{key} = {value}")
+        _emit_text(f"{key} = {value}")
 
 
 def show_list(title: str, items: Iterable[object]) -> None:
     rendered_items = list(items)
-    print(f"{title}：")
+    _emit_text(f"{title}：")
     if not rendered_items:
-        print("(空)")
+        _emit_text("(空)")
         return
 
     for index, item in enumerate(rendered_items, start=1):
-        print(f"{index}. {item}")
+        _emit_text(f"{index}. {item}")
 
 
 def show_records(title: str, records: Sequence[Mapping[str, object]]) -> None:
     show_section(title)
     if not records:
-        print("当前没有符合条件的记录。")
+        _emit_text("当前没有符合条件的记录。")
         return
 
     for index, record in enumerate(records, start=1):
-        print(f"{index}. artwork_id = {record.get('artwork_id', '')}")
+        _emit_text(f"{index}. artwork_id = {record.get('artwork_id', '')}")
         for key, value in record.items():
             if key == "artwork_id" or value in {"", None}:
                 continue
-            print(f"   {key} = {value}")
+            _emit_text(f"   {key} = {value}")
 
 
 def show_incremental_selection_summary(selection: IncrementalSelectionResult) -> None:
@@ -144,11 +186,11 @@ def show_following_update_summary(
 def show_doctor_report(report: "DoctorReport") -> None:
     show_section("运行环境自检")
     for check in report["checks"]:
-        print(f"[{check['status'].upper()}] {check['name']}：{check['detail']}")
+        _emit_text(f"[{check['status'].upper()}] {check['name']}：{check['detail']}")
 
 
 def show_json(payload: object) -> None:
-    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    _emit_text(json.dumps(payload, ensure_ascii=False, indent=2))
 
 
 def write_json_file(payload: object, file_path: str) -> None:
@@ -161,15 +203,15 @@ def write_json_file(payload: object, file_path: str) -> None:
 
 
 def show_warning(message: str) -> None:
-    print(message)
+    _emit_text(message)
 
 
 def show_success(message: str) -> None:
-    print(message)
+    _emit_text(message)
 
 
 def show_error(message: str) -> None:
-    print(message)
+    _emit_text(message)
 
 
 def prompt(label: str) -> str:
