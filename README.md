@@ -131,6 +131,7 @@ python main.py archive-records --status completed --days 30 --limit 100 --format
 python main.py doctor
 python main.py doctor --strict
 python main.py doctor --json
+python main.py doctor --output data/exports/doctor-report.json
 ```
 
 其中 `doctor` 适合在正式抓取前先做环境自检：
@@ -138,6 +139,7 @@ python main.py doctor --json
 - 默认模式下，只有出现 `error` 才返回非 `0` 退出码
 - 加上 `--strict` 后，`warn` 也会返回非 `0`，更适合脚本、CI 或计划任务前置检查
 - 加上 `--json` 后，会输出结构化结果，方便脚本直接解析 `checks / summary / exit_code`
+- 加上 `--output` 后，会把同一份 JSON 自检结果落盘，方便留档或让别的工具继续消费
 
 ## 🧩 核心能力
 

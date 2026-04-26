@@ -8,6 +8,7 @@
 """
 
 import json
+from pathlib import Path
 from typing import TYPE_CHECKING
 from collections.abc import Iterable, Mapping, Sequence
 
@@ -148,6 +149,15 @@ def show_doctor_report(report: "DoctorReport") -> None:
 
 def show_json(payload: object) -> None:
     print(json.dumps(payload, ensure_ascii=False, indent=2))
+
+
+def write_json_file(payload: object, file_path: str) -> None:
+    target_path = Path(file_path)
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
 
 
 def show_warning(message: str) -> None:

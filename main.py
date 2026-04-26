@@ -158,6 +158,11 @@ def build_argument_parser() -> argparse.ArgumentParser:
         dest="json_output",
         help="以 JSON 输出自检结果，适合脚本或 CI 消费。",
     )
+    doctor_parser.add_argument(
+        "--output",
+        default="",
+        help="把自检 JSON 结果写入指定文件路径。",
+    )
 
     return parser
 
@@ -261,18 +266,24 @@ def main(argv: list[str] | None = None) -> int | None:
                 report,
                 strict=bool(runtime_args.strict) if runtime_args else False,
             )
+            payload = {
+                "checks": report["checks"],
+                "summary": summary,
+                "strict": bool(runtime_args.strict) if runtime_args else False,
+                "exit_code": exit_code,
+            }
+
+            output_path = str(runtime_args.output).strip() if runtime_args else ""
+            if output_path:
+                console_service.write_json_file(payload, output_path)
+
             if runtime_args and runtime_args.json_output:
-                console_service.show_json(
-                    {
-                        "checks": report["checks"],
-                        "summary": summary,
-                        "strict": bool(runtime_args.strict),
-                        "exit_code": exit_code,
-                    }
-                )
+                console_service.show_json(payload)
             else:
                 console_service.show_doctor_report(report)
                 console_service.show_summary("自检结果汇总", list(summary.items()))
+                if output_path:
+                    console_service.show_success(f"自检结果已写入：{output_path}")
             if interactive_mode:
                 console_service.pause_before_exit()
             return exit_code

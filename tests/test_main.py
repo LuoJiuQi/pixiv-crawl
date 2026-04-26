@@ -101,6 +101,13 @@ class MainInputParsingTestCase(unittest.TestCase):
         self.assertEqual(args.action, "doctor")
         self.assertTrue(args.json_output)
 
+    def test_parse_runtime_arguments_supports_doctor_output_file(self) -> None:
+        args = parse_runtime_arguments(["doctor", "--output", "data/doctor.json"])
+
+        self.assertIsNotNone(args)
+        self.assertEqual(args.action, "doctor")
+        self.assertEqual(args.output, "data/doctor.json")
+
     def test_main_stops_when_login_fails(self) -> None:
         mock_client = MagicMock()
         mock_client.state_manager.state_exists.return_value = False
@@ -435,6 +442,115 @@ class MainInputParsingTestCase(unittest.TestCase):
         )
         mocked_show_doctor_report.assert_not_called()
         mocked_show_summary.assert_not_called()
+        self.assertEqual(exit_code, 0)
+        mock_repository.initialize.assert_not_called()
+        mock_client.close.assert_called_once()
+
+    def test_main_routes_doctor_output_file_with_human_summary(self) -> None:
+        mock_client = MagicMock()
+        mock_repository = MagicMock()
+        report = {
+            "checks": [
+                {"name": "浏览器启动", "status": "ok", "detail": "ok"},
+            ]
+        }
+        summary = {"ok": 1, "warn": 0, "error": 0, "skip": 0}
+
+        with patch("main.BrowserClient", return_value=mock_client), patch(
+            "main.DownloadRecordRepository",
+            return_value=mock_repository,
+        ), patch(
+            "main.configure_logging",
+        ), patch(
+            "main.run_doctor",
+            return_value=report,
+        ), patch(
+            "main.summarize_doctor_report",
+            return_value=summary,
+        ), patch(
+            "main.get_doctor_exit_code",
+            return_value=0,
+        ), patch(
+            "main.console_service.write_json_file"
+        ) as mocked_write_json_file, patch(
+            "main.console_service.show_doctor_report"
+        ) as mocked_show_doctor_report, patch(
+            "main.console_service.show_summary"
+        ) as mocked_show_summary, patch(
+            "main.console_service.show_success"
+        ) as mocked_show_success, patch(
+            "main.console_service.show_json"
+        ) as mocked_show_json:
+            exit_code = main.main(["doctor", "--output", "data/doctor.json"])
+
+        mocked_write_json_file.assert_called_once_with(
+            {
+                "checks": report["checks"],
+                "summary": summary,
+                "strict": False,
+                "exit_code": 0,
+            },
+            "data/doctor.json",
+        )
+        mocked_show_doctor_report.assert_called_once_with(report)
+        mocked_show_summary.assert_called_once_with(
+            "自检结果汇总",
+            [("ok", 1), ("warn", 0), ("error", 0), ("skip", 0)],
+        )
+        mocked_show_success.assert_called_once_with("自检结果已写入：data/doctor.json")
+        mocked_show_json.assert_not_called()
+        self.assertEqual(exit_code, 0)
+        mock_repository.initialize.assert_not_called()
+        mock_client.close.assert_called_once()
+
+    def test_main_routes_doctor_json_output_can_write_file_at_same_time(self) -> None:
+        mock_client = MagicMock()
+        mock_repository = MagicMock()
+        report = {
+            "checks": [
+                {"name": "浏览器启动", "status": "ok", "detail": "ok"},
+            ]
+        }
+        summary = {"ok": 1, "warn": 0, "error": 0, "skip": 0}
+
+        with patch("main.BrowserClient", return_value=mock_client), patch(
+            "main.DownloadRecordRepository",
+            return_value=mock_repository,
+        ), patch(
+            "main.configure_logging",
+        ), patch(
+            "main.run_doctor",
+            return_value=report,
+        ), patch(
+            "main.summarize_doctor_report",
+            return_value=summary,
+        ), patch(
+            "main.get_doctor_exit_code",
+            return_value=0,
+        ), patch(
+            "main.console_service.write_json_file"
+        ) as mocked_write_json_file, patch(
+            "main.console_service.show_json"
+        ) as mocked_show_json, patch(
+            "main.console_service.show_doctor_report"
+        ) as mocked_show_doctor_report, patch(
+            "main.console_service.show_summary"
+        ) as mocked_show_summary, patch(
+            "main.console_service.show_success"
+        ) as mocked_show_success:
+            exit_code = main.main(["doctor", "--json", "--output", "data/doctor.json"])
+
+        payload = {
+            "checks": report["checks"],
+            "summary": summary,
+            "strict": False,
+            "exit_code": 0,
+        }
+        mocked_write_json_file.assert_called_once_with(payload, "data/doctor.json")
+        mocked_show_json.assert_called_once_with(payload)
+        mocked_show_doctor_report.assert_not_called()
+        mocked_show_summary.assert_not_called()
+        mocked_show_success.assert_not_called()
         self.assertEqual(exit_code, 0)
         mock_repository.initialize.assert_not_called()
         mock_client.close.assert_called_once()

@@ -1,4 +1,6 @@
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import call, patch
 
 from app.services import console_service
@@ -54,6 +56,18 @@ class ConsoleServiceTestCase(unittest.TestCase):
             console_service.show_json({"message": "环境正常", "ok": True})
 
         mocked_print.assert_called_once_with('{\n  "message": "环境正常",\n  "ok": true\n}')
+
+    def test_write_json_file_creates_parent_directories_and_writes_utf8_json(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "doctor" / "report.json"
+
+            console_service.write_json_file({"message": "环境正常", "ok": True}, str(output_path))
+
+            self.assertTrue(output_path.exists())
+            self.assertEqual(
+                output_path.read_text(encoding="utf-8"),
+                '{\n  "message": "环境正常",\n  "ok": true\n}',
+            )
 
 
 if __name__ == "__main__":
