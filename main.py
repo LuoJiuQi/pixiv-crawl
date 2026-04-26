@@ -38,6 +38,7 @@ from app.services.cli_service import (
     parse_artwork_ids,
     show_history,
 )
+from app.services.doctor_service import run_doctor, summarize_doctor_report
 from app.services.task_service import (
     process_artwork_batch,
     select_incremental_artwork_ids,
@@ -145,6 +146,8 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="确认执行归档并删除，不再二次提示。",
     )
 
+    subparsers.add_parser("doctor", help="检查运行环境、浏览器与登录态")
+
     return parser
 
 
@@ -239,11 +242,20 @@ def main(argv: list[str] | None = None) -> None:
     interactive_mode = runtime_args is None
 
     try:
+        action = runtime_args.action if runtime_args else choose_action()
+        if action == "doctor":
+            report = run_doctor()
+            console_service.show_doctor_report(report)
+            summary = summarize_doctor_report(report)
+            console_service.show_summary("自检结果汇总", list(summary.items()))
+            if interactive_mode:
+                console_service.pause_before_exit()
+            return
+
         # 先确保数据库表已经准备好。
         # 这样后面不管是查看历史、重试失败，还是正式抓取，都有地方读写记录。
         record_repository.initialize()
 
-        action = runtime_args.action if runtime_args else choose_action()
         if action == "history":
             show_history(
                 record_repository,

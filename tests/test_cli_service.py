@@ -41,6 +41,15 @@ class CliServiceTestCase(unittest.TestCase):
 
         mocked_show_menu.assert_called_once()
 
+    def test_choose_action_supports_doctor_mode(self) -> None:
+        with patch("app.services.cli_service.console_service.show_menu") as mocked_show_menu, patch(
+            "builtins.input",
+            return_value="8",
+        ):
+            self.assertEqual(choose_action(), "doctor")
+
+        mocked_show_menu.assert_called_once()
+
     def test_show_history_uses_console_summary_and_records(self) -> None:
         mock_repository = MagicMock()
         mock_repository.get_status_summary.return_value = {

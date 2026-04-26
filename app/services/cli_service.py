@@ -49,10 +49,11 @@ def choose_action() -> str:
             "归档并清理旧记录",
             "按作者批量抓取作品",
             "按关注列表更新画师",
+            "运行环境自检",
         ]
     )
 
-    choice = console_service.prompt("请输入 1、2、3、4、5、6 或 7，直接回车默认 1：").strip()
+    choice = console_service.prompt("请输入 1、2、3、4、5、6、7 或 8，直接回车默认 1：").strip()
     if choice == "2":
         return "history"
     if choice == "3":
@@ -65,6 +66,8 @@ def choose_action() -> str:
         return "crawl_author"
     if choice == "7":
         return "crawl_following"
+    if choice == "8":
+        return "doctor"
     return "crawl"
 
 

@@ -81,6 +81,12 @@ class MainInputParsingTestCase(unittest.TestCase):
         self.assertEqual(args.following_limit, 3)
         self.assertEqual(args.completed_streak_limit, 15)
 
+    def test_parse_runtime_arguments_supports_doctor_command(self) -> None:
+        args = parse_runtime_arguments(["doctor"])
+
+        self.assertIsNotNone(args)
+        self.assertEqual(args.action, "doctor")
+
     def test_main_stops_when_login_fails(self) -> None:
         mock_client = MagicMock()
         mock_client.state_manager.state_exists.return_value = False
@@ -282,6 +288,47 @@ class MainInputParsingTestCase(unittest.TestCase):
             limit=5,
             prompt_for_filters=False,
         )
+        mock_client.start.assert_not_called()
+        mocked_pause.assert_not_called()
+        mock_client.close.assert_called_once()
+
+    def test_main_routes_doctor_command_without_initializing_database(self) -> None:
+        mock_client = MagicMock()
+        mock_repository = MagicMock()
+        report = {
+            "checks": [
+                {"name": "浏览器启动", "status": "ok", "detail": "ok"},
+            ]
+        }
+
+        with patch("main.BrowserClient", return_value=mock_client), patch(
+            "main.DownloadRecordRepository",
+            return_value=mock_repository,
+        ), patch(
+            "main.configure_logging",
+        ), patch(
+            "main.run_doctor",
+            return_value=report,
+        ) as mocked_run_doctor, patch(
+            "main.summarize_doctor_report",
+            return_value={"ok": 1, "warn": 0, "error": 0, "skip": 0},
+        ) as mocked_summarize, patch(
+            "main.console_service.show_doctor_report"
+        ) as mocked_show_doctor_report, patch(
+            "main.console_service.show_summary"
+        ) as mocked_show_summary, patch(
+            "main.console_service.pause_before_exit"
+        ) as mocked_pause:
+            main.main(["doctor"])
+
+        mocked_run_doctor.assert_called_once()
+        mocked_summarize.assert_called_once_with(report)
+        mocked_show_doctor_report.assert_called_once_with(report)
+        mocked_show_summary.assert_called_once_with(
+            "自检结果汇总",
+            [("ok", 1), ("warn", 0), ("error", 0), ("skip", 0)],
+        )
+        mock_repository.initialize.assert_not_called()
         mock_client.start.assert_not_called()
         mocked_pause.assert_not_called()
         mock_client.close.assert_called_once()

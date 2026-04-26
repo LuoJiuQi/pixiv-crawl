@@ -116,6 +116,7 @@ python main.py
 | `5` | 归档并清理旧记录 |
 | `6` | 按作者批量抓取作品 |
 | `7` | 按关注列表更新画师 |
+| `8` | 运行环境自检 |
 
 除了菜单模式，也支持直接走非交互参数模式，适合 Docker、计划任务或脚本调用：
 
@@ -127,6 +128,7 @@ python main.py retry-failed --error-type rate_limit --limit 50
 python main.py history --status failed --error-type http_5xx --limit 20
 python main.py export-failed --error-type download --format json
 python main.py archive-records --status completed --days 30 --limit 100 --format json --yes
+python main.py doctor
 ```
 
 ## 🧩 核心能力

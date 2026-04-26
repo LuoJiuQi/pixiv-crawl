@@ -7,9 +7,13 @@
 - 交互提示
 """
 
+from typing import TYPE_CHECKING
 from collections.abc import Iterable, Mapping, Sequence
 
 from app.services.task_service import BatchRunSummary, IncrementalSelectionResult
+
+if TYPE_CHECKING:
+    from app.services.doctor_service import DoctorReport
 
 
 def show_menu(options: list[str]) -> None:
@@ -133,6 +137,12 @@ def show_following_update_summary(
         show_list("本次跳过的作者", skipped_authors)
     if failed_authors:
         show_list("作者级失败详情", [f"{user_id}: {error}" for user_id, error in failed_authors])
+
+
+def show_doctor_report(report: "DoctorReport") -> None:
+    show_section("运行环境自检")
+    for check in report["checks"]:
+        print(f"[{check['status'].upper()}] {check['name']}：{check['detail']}")
 
 
 def show_warning(message: str) -> None:
