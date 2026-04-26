@@ -209,6 +209,14 @@ flowchart LR
 
 当前已经覆盖主流程、登录、解析器、下载器、下载规划、路径规则、数据库、CLI、终端展示、作者抓取等核心链路。
 
+CI 里除了跑单元测试，还会先执行一次：
+
+```powershell
+python main.py doctor --json
+```
+
+这一步会确认 Playwright/Chromium 能启动、关键路径可写，并把结果以结构化 JSON 输出出来。
+
 ```powershell
 python -m unittest tests.test_task_service tests.test_author_crawler tests.test_cli_service tests.test_record_exporter tests.test_failure_exporter tests.test_failure_classifier tests.test_db tests.test_main tests.test_parser tests.test_downloader tests.test_console_service tests.test_login tests.test_artwork_crawler tests.test_download_path_builder tests.test_download_planner -v
 ```
