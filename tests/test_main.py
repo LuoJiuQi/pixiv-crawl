@@ -87,6 +87,13 @@ class MainInputParsingTestCase(unittest.TestCase):
         self.assertIsNotNone(args)
         self.assertEqual(args.action, "doctor")
 
+    def test_parse_runtime_arguments_supports_doctor_strict_mode(self) -> None:
+        args = parse_runtime_arguments(["doctor", "--strict"])
+
+        self.assertIsNotNone(args)
+        self.assertEqual(args.action, "doctor")
+        self.assertTrue(args.strict)
+
     def test_main_stops_when_login_fails(self) -> None:
         mock_client = MagicMock()
         mock_client.state_manager.state_exists.return_value = False
@@ -313,24 +320,67 @@ class MainInputParsingTestCase(unittest.TestCase):
             "main.summarize_doctor_report",
             return_value={"ok": 1, "warn": 0, "error": 0, "skip": 0},
         ) as mocked_summarize, patch(
+            "main.get_doctor_exit_code",
+            return_value=0,
+        ) as mocked_get_exit_code, patch(
             "main.console_service.show_doctor_report"
         ) as mocked_show_doctor_report, patch(
             "main.console_service.show_summary"
         ) as mocked_show_summary, patch(
             "main.console_service.pause_before_exit"
         ) as mocked_pause:
-            main.main(["doctor"])
+            exit_code = main.main(["doctor"])
 
         mocked_run_doctor.assert_called_once()
         mocked_summarize.assert_called_once_with(report)
+        mocked_get_exit_code.assert_called_once_with(report, strict=False)
         mocked_show_doctor_report.assert_called_once_with(report)
         mocked_show_summary.assert_called_once_with(
             "自检结果汇总",
             [("ok", 1), ("warn", 0), ("error", 0), ("skip", 0)],
         )
+        self.assertEqual(exit_code, 0)
         mock_repository.initialize.assert_not_called()
         mock_client.start.assert_not_called()
         mocked_pause.assert_not_called()
+        mock_client.close.assert_called_once()
+
+    def test_main_routes_doctor_strict_mode_to_nonzero_exit_code(self) -> None:
+        mock_client = MagicMock()
+        mock_repository = MagicMock()
+        report = {
+            "checks": [
+                {"name": "账号密码", "status": "warn", "detail": "missing"},
+            ]
+        }
+
+        with patch("main.BrowserClient", return_value=mock_client), patch(
+            "main.DownloadRecordRepository",
+            return_value=mock_repository,
+        ), patch(
+            "main.configure_logging",
+        ), patch(
+            "main.run_doctor",
+            return_value=report,
+        ), patch(
+            "main.summarize_doctor_report",
+            return_value={"ok": 0, "warn": 1, "error": 0, "skip": 0},
+        ), patch(
+            "main.get_doctor_exit_code",
+            return_value=1,
+        ) as mocked_get_exit_code, patch(
+            "main.console_service.show_doctor_report"
+        ), patch(
+            "main.console_service.show_summary"
+        ), patch(
+            "main.console_service.pause_before_exit"
+        ) as mocked_pause:
+            exit_code = main.main(["doctor", "--strict"])
+
+        mocked_get_exit_code.assert_called_once_with(report, strict=True)
+        self.assertEqual(exit_code, 1)
+        mocked_pause.assert_not_called()
+        mock_repository.initialize.assert_not_called()
         mock_client.close.assert_called_once()
 
     def test_main_routes_export_failed_cli_arguments_without_prompting(self) -> None:

@@ -4,7 +4,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import MagicMock, patch
 
 from app.services import doctor_service
-from app.services.doctor_service import run_doctor, summarize_doctor_report
+from app.services.doctor_service import get_doctor_exit_code, run_doctor, summarize_doctor_report
 
 
 class DoctorServiceTestCase(unittest.TestCase):
@@ -160,6 +160,42 @@ class DoctorServiceTestCase(unittest.TestCase):
             summary,
             {"ok": 1, "warn": 2, "error": 1, "skip": 1},
         )
+
+    def test_get_doctor_exit_code_returns_zero_when_only_warn_without_strict(self) -> None:
+        exit_code = get_doctor_exit_code(
+            {
+                "checks": [
+                    {"name": "a", "status": "ok", "detail": ""},
+                    {"name": "b", "status": "warn", "detail": ""},
+                ]
+            }
+        )
+
+        self.assertEqual(exit_code, 0)
+
+    def test_get_doctor_exit_code_returns_one_for_warn_in_strict_mode(self) -> None:
+        exit_code = get_doctor_exit_code(
+            {
+                "checks": [
+                    {"name": "a", "status": "warn", "detail": ""},
+                ]
+            },
+            strict=True,
+        )
+
+        self.assertEqual(exit_code, 1)
+
+    def test_get_doctor_exit_code_returns_one_when_error_exists(self) -> None:
+        exit_code = get_doctor_exit_code(
+            {
+                "checks": [
+                    {"name": "a", "status": "error", "detail": ""},
+                    {"name": "b", "status": "warn", "detail": ""},
+                ]
+            }
+        )
+
+        self.assertEqual(exit_code, 1)
 
 
 if __name__ == "__main__":

@@ -169,3 +169,15 @@ def summarize_doctor_report(report: DoctorReport) -> dict[str, int]:
     for check in report["checks"]:
         summary[check["status"]] += 1
     return summary
+
+
+def get_doctor_exit_code(report: DoctorReport, *, strict: bool = False) -> int:
+    summary = summarize_doctor_report(report)
+
+    if summary["error"] > 0:
+        return 1
+
+    if strict and summary["warn"] > 0:
+        return 1
+
+    return 0

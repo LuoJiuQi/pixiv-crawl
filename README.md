@@ -129,7 +129,13 @@ python main.py history --status failed --error-type http_5xx --limit 20
 python main.py export-failed --error-type download --format json
 python main.py archive-records --status completed --days 30 --limit 100 --format json --yes
 python main.py doctor
+python main.py doctor --strict
 ```
+
+其中 `doctor` 适合在正式抓取前先做环境自检：
+
+- 默认模式下，只有出现 `error` 才返回非 `0` 退出码
+- 加上 `--strict` 后，`warn` 也会返回非 `0`，更适合脚本、CI 或计划任务前置检查
 
 ## 🧩 核心能力
 

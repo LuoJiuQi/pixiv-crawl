@@ -38,7 +38,7 @@ from app.services.cli_service import (
     parse_artwork_ids,
     show_history,
 )
-from app.services.doctor_service import run_doctor, summarize_doctor_report
+from app.services.doctor_service import get_doctor_exit_code, run_doctor, summarize_doctor_report
 from app.services.task_service import (
     process_artwork_batch,
     select_incremental_artwork_ids,
@@ -146,7 +146,12 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="确认执行归档并删除，不再二次提示。",
     )
 
-    subparsers.add_parser("doctor", help="检查运行环境、浏览器与登录态")
+    doctor_parser = subparsers.add_parser("doctor", help="检查运行环境、浏览器与登录态")
+    doctor_parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="将 warning 也视为失败，返回非 0 退出码。",
+    )
 
     return parser
 
@@ -223,7 +228,7 @@ def _normalize_optional_text(value: str | None) -> str | None:
     return text or None
 
 
-def main(argv: list[str] | None = None) -> None:
+def main(argv: list[str] | None = None) -> int | None:
     """
     主函数。
 
@@ -248,9 +253,13 @@ def main(argv: list[str] | None = None) -> None:
             console_service.show_doctor_report(report)
             summary = summarize_doctor_report(report)
             console_service.show_summary("自检结果汇总", list(summary.items()))
+            exit_code = get_doctor_exit_code(
+                report,
+                strict=bool(runtime_args.strict) if runtime_args else False,
+            )
             if interactive_mode:
                 console_service.pause_before_exit()
-            return
+            return exit_code
 
         # 先确保数据库表已经准备好。
         # 这样后面不管是查看历史、重试失败，还是正式抓取，都有地方读写记录。
@@ -474,4 +483,4 @@ def main(argv: list[str] | None = None) -> None:
 # 只有你“直接运行这个文件”时，程序才会从这里启动。
 # 如果别的文件只是 `import main`，那就不会自动执行。
 if __name__ == "__main__":
-    main(sys.argv[1:])
+    sys.exit(main(sys.argv[1:]))
