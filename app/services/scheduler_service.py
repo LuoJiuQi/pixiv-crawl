@@ -54,6 +54,11 @@ def build_scheduled_crawl_command(python_executable: str | None = None) -> list[
     return [executable, str(PROJECT_ROOT / "main.py"), "crawl-following"]
 
 
+def build_scheduled_doctor_command(python_executable: str | None = None) -> list[str]:
+    executable = python_executable or sys.executable
+    return [executable, str(PROJECT_ROOT / "main.py"), "doctor", "--strict"]
+
+
 def run_scheduled_crawl_loop(
     *,
     stop_after_runs: int | None = None,
@@ -72,6 +77,16 @@ def run_scheduled_crawl_loop(
             next_run.strftime("%Y-%m-%d %H:%M"),
         )
         sleep_until(next_run, now_fn=now_fn, sleep_fn=sleep_fn)
+
+        doctor_command = build_scheduled_doctor_command(python_executable=python_executable)
+        logger.info("开始执行定时自检命令：%s", doctor_command)
+        doctor_result = command_runner(doctor_command, cwd=str(PROJECT_ROOT))
+        logger.info("本次定时自检已结束，退出码：%s", doctor_result.returncode)
+
+        if doctor_result.returncode != 0:
+            logger.warning("定时自检未通过，已跳过本轮关注列表更新。")
+            run_count += 1
+            continue
 
         command = build_scheduled_crawl_command(python_executable=python_executable)
         logger.info("开始执行定时抓取命令：%s", command)

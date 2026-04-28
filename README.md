@@ -123,7 +123,7 @@ python main.py
 SCHEDULED_RUN_ENABLED=true
 ```
 
-那么这里的 `python main.py` 就不会进入交互菜单，而是会进入“每日定时模式”，到设定时间自动执行一次 `crawl-following`。
+那么这里的 `python main.py` 就不会进入交互菜单，而是会进入“每日定时模式”，到设定时间先执行一次 `doctor --strict`，只有自检通过才会继续执行 `crawl-following`。
 
 ## 📦 运行模式
 
@@ -161,7 +161,7 @@ python main.py doctor --output data/exports/doctor-report.json
 - 加上 `--json` 后，会输出结构化结果，方便脚本直接解析 `checks / summary / exit_code`
 - 加上 `--output` 后，会把同一份 JSON 自检结果落盘，方便留档或让别的工具继续消费
 
-内置定时模式则适合“每天固定时间自动更新关注画师作品”。它默认复用现有的 `crawl-following` 流程，不会改变你平时手动执行其他命令的方式。
+内置定时模式则适合“每天固定时间自动更新关注画师作品”。它默认会先跑一次 `doctor --strict`，自检通过后再复用现有的 `crawl-following` 流程，不会改变你平时手动执行其他命令的方式。
 
 ## 🧩 核心能力
 
