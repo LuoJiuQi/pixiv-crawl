@@ -37,6 +37,7 @@ class SettingsTestCase(unittest.TestCase):
         self.assertEqual(settings.scheduled_run_time, "02:00")
         self.assertFalse(settings.scheduled_retry_failed_enabled)
         self.assertEqual(settings.scheduled_retry_failed_limit, 20)
+        self.assertEqual(settings.scheduled_report_output_dir, "./data/exports/scheduled-reports")
 
     def test_scheduled_run_time_can_be_loaded_from_environment(self) -> None:
         with patch.dict(

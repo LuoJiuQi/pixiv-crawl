@@ -87,6 +87,7 @@ SCHEDULED_RUN_ENABLED=true
 SCHEDULED_RUN_TIME=02:00
 SCHEDULED_RETRY_FAILED_ENABLED=true
 SCHEDULED_RETRY_FAILED_LIMIT=20
+SCHEDULED_REPORT_OUTPUT_DIR=./data/exports/scheduled-reports
 ```
 
 含义是：
@@ -95,6 +96,7 @@ SCHEDULED_RETRY_FAILED_LIMIT=20
 - `SCHEDULED_RUN_TIME=02:00`：每天凌晨 2 点执行一次，固定使用 24 小时制 `HH:MM`
 - `SCHEDULED_RETRY_FAILED_ENABLED=true`：定时更新成功后，再补跑一次失败重试
 - `SCHEDULED_RETRY_FAILED_LIMIT=20`：失败重试最多处理 20 条失败记录
+- `SCHEDULED_REPORT_OUTPUT_DIR=...`：每轮定时执行结束后，把 JSON 报告写到这里
 
 下载相关配置默认如下：
 
@@ -127,7 +129,7 @@ python main.py
 SCHEDULED_RUN_ENABLED=true
 ```
 
-那么这里的 `python main.py` 就不会进入交互菜单，而是会进入“每日定时模式”，到设定时间先执行一次 `doctor --strict`，只有自检通过才会继续执行 `crawl-following`；如果你同时开启了 `SCHEDULED_RETRY_FAILED_ENABLED=true`，更新完成后还会再补跑一次 `retry-failed --limit ...`。
+那么这里的 `python main.py` 就不会进入交互菜单，而是会进入“每日定时模式”，到设定时间先执行一次 `doctor --strict`，只有自检通过才会继续执行 `crawl-following`；如果你同时开启了 `SCHEDULED_RETRY_FAILED_ENABLED=true`，更新完成后还会再补跑一次 `retry-failed --limit ...`。无论这轮最后成功还是失败，都会在 `SCHEDULED_REPORT_OUTPUT_DIR` 下留一份 JSON 报告。
 
 ## 📦 运行模式
 
@@ -165,7 +167,7 @@ python main.py doctor --output data/exports/doctor-report.json
 - 加上 `--json` 后，会输出结构化结果，方便脚本直接解析 `checks / summary / exit_code`
 - 加上 `--output` 后，会把同一份 JSON 自检结果落盘，方便留档或让别的工具继续消费
 
-内置定时模式则适合“每天固定时间自动更新关注画师作品”。它默认会先跑一次 `doctor --strict`，自检通过后再复用现有的 `crawl-following` 流程；如果你开启了失败补偿配置，还会在更新成功后自动补跑一次有限条数的失败重试，不会改变你平时手动执行其他命令的方式。
+内置定时模式则适合“每天固定时间自动更新关注画师作品”。它默认会先跑一次 `doctor --strict`，自检通过后再复用现有的 `crawl-following` 流程；如果你开启了失败补偿配置，还会在更新成功后自动补跑一次有限条数的失败重试。每一轮执行结束后都会落一份 JSON 报告，方便回看当天到底是哪一步成功、哪一步失败，不会改变你平时手动执行其他命令的方式。
 
 ## 🧩 核心能力
 

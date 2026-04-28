@@ -1,5 +1,7 @@
 import unittest
 from datetime import datetime
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 
 from app.services import scheduler_service
@@ -44,8 +46,34 @@ class SchedulerServiceTestCase(unittest.TestCase):
         self.assertEqual(command[-3:], ["retry-failed", "--limit", "15"])
         self.assertTrue(command[1].endswith("main.py"))
 
+    def test_build_scheduled_report_path_uses_timestamped_json_name(self) -> None:
+        report_path = scheduler_service.build_scheduled_report_path(
+            datetime(2026, 4, 29, 9, 30, 5),
+            output_dir="./data/exports/reports",
+        )
+
+        normalized_path = report_path.replace("\\", "/")
+        self.assertTrue(
+            normalized_path.endswith("data/exports/reports/scheduled-run-20260429-093005.json")
+        )
+
+    def test_write_scheduled_run_report_writes_json_file(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            report_path = scheduler_service.write_scheduled_run_report(
+                {"status": "completed"},
+                run_started_at=datetime(2026, 4, 29, 9, 30, 5),
+                output_dir=temp_dir,
+            )
+
+            self.assertTrue(Path(report_path).exists())
+            self.assertEqual(
+                Path(report_path).read_text(encoding="utf-8"),
+                '{\n  "status": "completed"\n}',
+            )
+
     def test_run_scheduled_crawl_loop_runs_doctor_then_crawl_when_limited(self) -> None:
         commands: list[tuple[list[str], str]] = []
+        written_reports: list[tuple[dict[str, object], datetime, str | None]] = []
 
         def fake_command_runner(command: list[str], *, cwd: str) -> SimpleNamespace:
             commands.append((command, cwd))
@@ -55,7 +83,14 @@ class SchedulerServiceTestCase(unittest.TestCase):
         scheduler_service.settings.scheduled_run_time = "09:30"
         try:
             original_sleep_until = scheduler_service.sleep_until
+            original_write_report = scheduler_service.write_scheduled_run_report
             scheduler_service.sleep_until = lambda target, *, now_fn, sleep_fn: None
+            scheduler_service.write_scheduled_run_report = (
+                lambda report, *, run_started_at, output_dir=None: written_reports.append(
+                    (report, run_started_at, output_dir)
+                )
+                or "mock-report.json"
+            )
             try:
                 result = scheduler_service.run_scheduled_crawl_loop(
                     stop_after_runs=1,
@@ -66,6 +101,7 @@ class SchedulerServiceTestCase(unittest.TestCase):
                 )
             finally:
                 scheduler_service.sleep_until = original_sleep_until
+                scheduler_service.write_scheduled_run_report = original_write_report
         finally:
             scheduler_service.settings.scheduled_run_time = original_time
 
@@ -73,9 +109,12 @@ class SchedulerServiceTestCase(unittest.TestCase):
         self.assertEqual(len(commands), 2)
         self.assertEqual(commands[0][0][-2:], ["doctor", "--strict"])
         self.assertEqual(commands[1][0][-1], "crawl-following")
+        self.assertEqual(len(written_reports), 1)
+        self.assertEqual(written_reports[0][0]["status"], "completed")
 
     def test_run_scheduled_crawl_loop_skips_crawl_when_doctor_fails(self) -> None:
         commands: list[tuple[list[str], str]] = []
+        written_reports: list[dict[str, object]] = []
 
         def fake_command_runner(command: list[str], *, cwd: str) -> SimpleNamespace:
             commands.append((command, cwd))
@@ -86,7 +125,12 @@ class SchedulerServiceTestCase(unittest.TestCase):
         scheduler_service.settings.scheduled_run_time = "09:30"
         try:
             original_sleep_until = scheduler_service.sleep_until
+            original_write_report = scheduler_service.write_scheduled_run_report
             scheduler_service.sleep_until = lambda target, *, now_fn, sleep_fn: None
+            scheduler_service.write_scheduled_run_report = (
+                lambda report, *, run_started_at, output_dir=None: written_reports.append(report)
+                or "mock-report.json"
+            )
             try:
                 result = scheduler_service.run_scheduled_crawl_loop(
                     stop_after_runs=1,
@@ -97,15 +141,18 @@ class SchedulerServiceTestCase(unittest.TestCase):
                 )
             finally:
                 scheduler_service.sleep_until = original_sleep_until
+                scheduler_service.write_scheduled_run_report = original_write_report
         finally:
             scheduler_service.settings.scheduled_run_time = original_time
 
         self.assertEqual(result, 0)
         self.assertEqual(len(commands), 1)
         self.assertEqual(commands[0][0][-2:], ["doctor", "--strict"])
+        self.assertEqual(written_reports[0]["status"], "skipped_by_doctor")
 
     def test_run_scheduled_crawl_loop_runs_retry_after_successful_crawl_when_enabled(self) -> None:
         commands: list[tuple[list[str], str]] = []
+        written_reports: list[dict[str, object]] = []
 
         def fake_command_runner(command: list[str], *, cwd: str) -> SimpleNamespace:
             commands.append((command, cwd))
@@ -119,7 +166,12 @@ class SchedulerServiceTestCase(unittest.TestCase):
         scheduler_service.settings.scheduled_retry_failed_limit = 15
         try:
             original_sleep_until = scheduler_service.sleep_until
+            original_write_report = scheduler_service.write_scheduled_run_report
             scheduler_service.sleep_until = lambda target, *, now_fn, sleep_fn: None
+            scheduler_service.write_scheduled_run_report = (
+                lambda report, *, run_started_at, output_dir=None: written_reports.append(report)
+                or "mock-report.json"
+            )
             try:
                 result = scheduler_service.run_scheduled_crawl_loop(
                     stop_after_runs=1,
@@ -130,6 +182,7 @@ class SchedulerServiceTestCase(unittest.TestCase):
                 )
             finally:
                 scheduler_service.sleep_until = original_sleep_until
+                scheduler_service.write_scheduled_run_report = original_write_report
         finally:
             scheduler_service.settings.scheduled_run_time = original_time
             scheduler_service.settings.scheduled_retry_failed_enabled = original_retry_enabled
@@ -140,9 +193,12 @@ class SchedulerServiceTestCase(unittest.TestCase):
         self.assertEqual(commands[0][0][-2:], ["doctor", "--strict"])
         self.assertEqual(commands[1][0][-1], "crawl-following")
         self.assertEqual(commands[2][0][-3:], ["retry-failed", "--limit", "15"])
+        self.assertEqual(written_reports[0]["status"], "completed")
+        self.assertEqual(written_reports[0]["retry_failed"]["returncode"], 0)
 
     def test_run_scheduled_crawl_loop_skips_retry_when_crawl_fails(self) -> None:
         commands: list[tuple[list[str], str]] = []
+        written_reports: list[dict[str, object]] = []
 
         def fake_command_runner(command: list[str], *, cwd: str) -> SimpleNamespace:
             commands.append((command, cwd))
@@ -158,7 +214,12 @@ class SchedulerServiceTestCase(unittest.TestCase):
         scheduler_service.settings.scheduled_retry_failed_limit = 15
         try:
             original_sleep_until = scheduler_service.sleep_until
+            original_write_report = scheduler_service.write_scheduled_run_report
             scheduler_service.sleep_until = lambda target, *, now_fn, sleep_fn: None
+            scheduler_service.write_scheduled_run_report = (
+                lambda report, *, run_started_at, output_dir=None: written_reports.append(report)
+                or "mock-report.json"
+            )
             try:
                 result = scheduler_service.run_scheduled_crawl_loop(
                     stop_after_runs=1,
@@ -169,6 +230,7 @@ class SchedulerServiceTestCase(unittest.TestCase):
                 )
             finally:
                 scheduler_service.sleep_until = original_sleep_until
+                scheduler_service.write_scheduled_run_report = original_write_report
         finally:
             scheduler_service.settings.scheduled_run_time = original_time
             scheduler_service.settings.scheduled_retry_failed_enabled = original_retry_enabled
@@ -178,3 +240,5 @@ class SchedulerServiceTestCase(unittest.TestCase):
         self.assertEqual(len(commands), 2)
         self.assertEqual(commands[0][0][-2:], ["doctor", "--strict"])
         self.assertEqual(commands[1][0][-1], "crawl-following")
+        self.assertEqual(written_reports[0]["status"], "crawl_failed")
+        self.assertEqual(written_reports[0]["retry_failed"]["reason"], "crawl_failed")

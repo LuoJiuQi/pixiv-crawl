@@ -110,6 +110,9 @@ class Settings(BaseSettings):
     # 0 表示不处理任何失败记录；通常建议配一个有限值，避免单次补偿拖太久。
     scheduled_retry_failed_limit: int = 20
 
+    # 定时任务每轮执行完成后，JSON 报告默认写到哪里。
+    scheduled_report_output_dir: str = "./data/exports/scheduled-reports"
+
     @field_validator("scheduled_run_time")
     @classmethod
     def validate_scheduled_run_time(cls, value: str) -> str:
