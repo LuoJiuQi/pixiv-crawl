@@ -20,6 +20,7 @@ import sys
 
 from app.browser.client import BrowserClient
 from app.browser.login import PixivLoginService
+from app.core.config import settings
 from app.core.logging_config import configure_logging, get_logger
 from app.crawler.author_crawler import AuthorCrawler
 from app.crawler.artwork_crawler import ArtworkCrawler
@@ -39,6 +40,7 @@ from app.services.cli_service import (
     show_history,
 )
 from app.services.doctor_service import get_doctor_exit_code, run_doctor, summarize_doctor_report
+from app.services.scheduler_service import run_scheduled_crawl_loop
 from app.services.task_service import (
     process_artwork_batch,
     select_incremental_artwork_ids,
@@ -259,6 +261,9 @@ def main(argv: list[str] | None = None) -> int | None:
     interactive_mode = runtime_args is None
 
     try:
+        if interactive_mode and settings.scheduled_run_enabled:
+            return run_scheduled_crawl_loop()
+
         action = runtime_args.action if runtime_args else choose_action()
         if action == "doctor":
             report = run_doctor()

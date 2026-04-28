@@ -2,6 +2,8 @@ import os
 import unittest
 from unittest.mock import patch
 
+from pydantic import ValidationError
+
 from app.core.config import Settings
 
 
@@ -26,6 +28,38 @@ class SettingsTestCase(unittest.TestCase):
 
         self.assertTrue(settings.save_debug_artifacts)
         self.assertTrue(settings.verbose_debug_output)
+
+    def test_scheduled_run_defaults_are_disabled_and_normalized(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            settings = Settings(_env_file=None)
+
+        self.assertFalse(settings.scheduled_run_enabled)
+        self.assertEqual(settings.scheduled_run_time, "02:00")
+
+    def test_scheduled_run_time_can_be_loaded_from_environment(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "SCHEDULED_RUN_ENABLED": "true",
+                "SCHEDULED_RUN_TIME": "6:30",
+            },
+            clear=True,
+        ):
+            settings = Settings(_env_file=None)
+
+        self.assertTrue(settings.scheduled_run_enabled)
+        self.assertEqual(settings.scheduled_run_time, "06:30")
+
+    def test_scheduled_run_time_rejects_invalid_24_hour_value(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "SCHEDULED_RUN_TIME": "25:99",
+            },
+            clear=True,
+        ):
+            with self.assertRaises(ValidationError):
+                Settings(_env_file=None)
 
 
 if __name__ == "__main__":

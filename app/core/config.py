@@ -13,6 +13,7 @@
 - 项目会更整洁，也更容易维护
 """
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -93,6 +94,29 @@ class Settings(BaseSettings):
 
     # 最多保留多少个历史滚动日志文件。
     log_backup_count: int = 5
+
+    # 是否开启内置定时抓取。
+    # 开启后，直接执行 `python main.py` 会进入每日定时模式，
+    # 到设定时间自动跑一次“按关注列表更新画师”。
+    scheduled_run_enabled: bool = False
+
+    # 每天几点开始执行定时抓取，24 小时制，格式固定为 HH:MM。
+    scheduled_run_time: str = "02:00"
+
+    @field_validator("scheduled_run_time")
+    @classmethod
+    def validate_scheduled_run_time(cls, value: str) -> str:
+        text = str(value).strip()
+        hour_text, separator, minute_text = text.partition(":")
+        if separator != ":" or not hour_text.isdigit() or not minute_text.isdigit():
+            raise ValueError("SCHEDULED_RUN_TIME 必须是 24 小时制 HH:MM 格式。")
+
+        hour = int(hour_text)
+        minute = int(minute_text)
+        if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+            raise ValueError("SCHEDULED_RUN_TIME 必须是有效的 24 小时制时间。")
+
+        return f"{hour:02d}:{minute:02d}"
 
     # 告诉 pydantic-settings 去哪里读取配置。
     model_config = SettingsConfigDict(

@@ -203,6 +203,32 @@ class MainInputParsingTestCase(unittest.TestCase):
         mocked_pause.assert_called_once()
         mock_client.close.assert_called_once()
 
+    def test_main_enters_scheduled_mode_when_enabled_without_arguments(self) -> None:
+        mock_client = MagicMock()
+        mock_repository = MagicMock()
+
+        with patch("main.BrowserClient", return_value=mock_client), patch(
+            "main.DownloadRecordRepository",
+            return_value=mock_repository,
+        ), patch("main.settings.scheduled_run_enabled", True), patch(
+            "main.console_service.configure_console_encoding",
+        ), patch(
+            "main.configure_logging",
+        ), patch(
+            "main.run_scheduled_crawl_loop",
+            return_value=0,
+        ) as mocked_run_scheduled_crawl_loop, patch(
+            "main.choose_action"
+        ) as mocked_choose_action:
+            exit_code = main.main()
+
+        mocked_run_scheduled_crawl_loop.assert_called_once()
+        mocked_choose_action.assert_not_called()
+        mock_repository.initialize.assert_not_called()
+        mock_client.start.assert_not_called()
+        self.assertEqual(exit_code, 0)
+        mock_client.close.assert_called_once()
+
     def test_main_routes_batch_summary_to_console_layer(self) -> None:
         mock_client = MagicMock()
         mock_client.state_manager.state_exists.return_value = True

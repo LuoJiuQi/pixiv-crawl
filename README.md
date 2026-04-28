@@ -80,6 +80,18 @@ VERBOSE_DEBUG_OUTPUT=false
 
 需要排查页面解析或下载异常时，再临时打开这两个开关。
 
+如果你想让程序自己每天定时跑一次“按关注列表更新画师”，还可以补：
+
+```env
+SCHEDULED_RUN_ENABLED=true
+SCHEDULED_RUN_TIME=02:00
+```
+
+含义是：
+
+- `SCHEDULED_RUN_ENABLED=true`：开启内置定时抓取
+- `SCHEDULED_RUN_TIME=02:00`：每天凌晨 2 点执行一次，固定使用 24 小时制 `HH:MM`
+
 下载相关配置默认如下：
 
 ```env
@@ -104,6 +116,14 @@ python main.py
 
 首次运行建议使用 `HEADLESS=false`，这样遇到 `reCAPTCHA` 时可以手动补验证并保存登录态。  
 目前在找方法看看怎么能才能绕过`reCAPTCHA`
+
+如果已经开启：
+
+```env
+SCHEDULED_RUN_ENABLED=true
+```
+
+那么这里的 `python main.py` 就不会进入交互菜单，而是会进入“每日定时模式”，到设定时间自动执行一次 `crawl-following`。
 
 ## 📦 运行模式
 
@@ -140,6 +160,8 @@ python main.py doctor --output data/exports/doctor-report.json
 - 加上 `--strict` 后，`warn` 也会返回非 `0`，更适合脚本、CI 或计划任务前置检查
 - 加上 `--json` 后，会输出结构化结果，方便脚本直接解析 `checks / summary / exit_code`
 - 加上 `--output` 后，会把同一份 JSON 自检结果落盘，方便留档或让别的工具继续消费
+
+内置定时模式则适合“每天固定时间自动更新关注画师作品”。它默认复用现有的 `crawl-following` 流程，不会改变你平时手动执行其他命令的方式。
 
 ## 🧩 核心能力
 
