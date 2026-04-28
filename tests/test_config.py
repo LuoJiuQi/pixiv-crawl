@@ -35,6 +35,8 @@ class SettingsTestCase(unittest.TestCase):
 
         self.assertFalse(settings.scheduled_run_enabled)
         self.assertEqual(settings.scheduled_run_time, "02:00")
+        self.assertFalse(settings.scheduled_retry_failed_enabled)
+        self.assertEqual(settings.scheduled_retry_failed_limit, 20)
 
     def test_scheduled_run_time_can_be_loaded_from_environment(self) -> None:
         with patch.dict(
@@ -55,6 +57,31 @@ class SettingsTestCase(unittest.TestCase):
             os.environ,
             {
                 "SCHEDULED_RUN_TIME": "25:99",
+            },
+            clear=True,
+        ):
+            with self.assertRaises(ValidationError):
+                Settings(_env_file=None)
+
+    def test_scheduled_retry_failed_config_can_be_loaded_from_environment(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "SCHEDULED_RETRY_FAILED_ENABLED": "true",
+                "SCHEDULED_RETRY_FAILED_LIMIT": "15",
+            },
+            clear=True,
+        ):
+            settings = Settings(_env_file=None)
+
+        self.assertTrue(settings.scheduled_retry_failed_enabled)
+        self.assertEqual(settings.scheduled_retry_failed_limit, 15)
+
+    def test_scheduled_retry_failed_limit_rejects_negative_value(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "SCHEDULED_RETRY_FAILED_LIMIT": "-1",
             },
             clear=True,
         ):

@@ -59,6 +59,22 @@ def build_scheduled_doctor_command(python_executable: str | None = None) -> list
     return [executable, str(PROJECT_ROOT / "main.py"), "doctor", "--strict"]
 
 
+def build_scheduled_retry_command(
+    *,
+    python_executable: str | None = None,
+    limit: int | None = None,
+) -> list[str]:
+    executable = python_executable or sys.executable
+    retry_limit = settings.scheduled_retry_failed_limit if limit is None else limit
+    return [
+        executable,
+        str(PROJECT_ROOT / "main.py"),
+        "retry-failed",
+        "--limit",
+        str(retry_limit),
+    ]
+
+
 def run_scheduled_crawl_loop(
     *,
     stop_after_runs: int | None = None,
@@ -92,6 +108,21 @@ def run_scheduled_crawl_loop(
         logger.info("开始执行定时抓取命令：%s", command)
         result = command_runner(command, cwd=str(PROJECT_ROOT))
         logger.info("本次定时抓取已结束，退出码：%s", result.returncode)
+
+        if result.returncode == 0 and settings.scheduled_retry_failed_enabled:
+            retry_limit = settings.scheduled_retry_failed_limit
+            if retry_limit > 0:
+                retry_command = build_scheduled_retry_command(
+                    python_executable=python_executable,
+                    limit=retry_limit,
+                )
+                logger.info("开始执行定时失败重试命令：%s", retry_command)
+                retry_result = command_runner(retry_command, cwd=str(PROJECT_ROOT))
+                logger.info("本次定时失败重试已结束，退出码：%s", retry_result.returncode)
+            else:
+                logger.info("已开启定时失败重试，但重试上限为 0，本轮跳过失败补偿。")
+        elif result.returncode != 0 and settings.scheduled_retry_failed_enabled:
+            logger.warning("定时抓取未成功结束，已跳过本轮失败补偿。")
         run_count += 1
 
     return 0

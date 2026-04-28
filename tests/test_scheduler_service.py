@@ -34,6 +34,16 @@ class SchedulerServiceTestCase(unittest.TestCase):
         self.assertEqual(command[-2:], ["doctor", "--strict"])
         self.assertTrue(command[1].endswith("main.py"))
 
+    def test_build_scheduled_retry_command_uses_limit(self) -> None:
+        command = scheduler_service.build_scheduled_retry_command(
+            python_executable="python",
+            limit=15,
+        )
+
+        self.assertEqual(command[0], "python")
+        self.assertEqual(command[-3:], ["retry-failed", "--limit", "15"])
+        self.assertTrue(command[1].endswith("main.py"))
+
     def test_run_scheduled_crawl_loop_runs_doctor_then_crawl_when_limited(self) -> None:
         commands: list[tuple[list[str], str]] = []
 
@@ -93,3 +103,78 @@ class SchedulerServiceTestCase(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertEqual(len(commands), 1)
         self.assertEqual(commands[0][0][-2:], ["doctor", "--strict"])
+
+    def test_run_scheduled_crawl_loop_runs_retry_after_successful_crawl_when_enabled(self) -> None:
+        commands: list[tuple[list[str], str]] = []
+
+        def fake_command_runner(command: list[str], *, cwd: str) -> SimpleNamespace:
+            commands.append((command, cwd))
+            return SimpleNamespace(returncode=0)
+
+        original_time = scheduler_service.settings.scheduled_run_time
+        original_retry_enabled = scheduler_service.settings.scheduled_retry_failed_enabled
+        original_retry_limit = scheduler_service.settings.scheduled_retry_failed_limit
+        scheduler_service.settings.scheduled_run_time = "09:30"
+        scheduler_service.settings.scheduled_retry_failed_enabled = True
+        scheduler_service.settings.scheduled_retry_failed_limit = 15
+        try:
+            original_sleep_until = scheduler_service.sleep_until
+            scheduler_service.sleep_until = lambda target, *, now_fn, sleep_fn: None
+            try:
+                result = scheduler_service.run_scheduled_crawl_loop(
+                    stop_after_runs=1,
+                    now_fn=lambda: datetime(2026, 4, 29, 8, 0, 0),
+                    sleep_fn=lambda _seconds: None,
+                    command_runner=fake_command_runner,
+                    python_executable="python",
+                )
+            finally:
+                scheduler_service.sleep_until = original_sleep_until
+        finally:
+            scheduler_service.settings.scheduled_run_time = original_time
+            scheduler_service.settings.scheduled_retry_failed_enabled = original_retry_enabled
+            scheduler_service.settings.scheduled_retry_failed_limit = original_retry_limit
+
+        self.assertEqual(result, 0)
+        self.assertEqual(len(commands), 3)
+        self.assertEqual(commands[0][0][-2:], ["doctor", "--strict"])
+        self.assertEqual(commands[1][0][-1], "crawl-following")
+        self.assertEqual(commands[2][0][-3:], ["retry-failed", "--limit", "15"])
+
+    def test_run_scheduled_crawl_loop_skips_retry_when_crawl_fails(self) -> None:
+        commands: list[tuple[list[str], str]] = []
+
+        def fake_command_runner(command: list[str], *, cwd: str) -> SimpleNamespace:
+            commands.append((command, cwd))
+            if command[-1] == "crawl-following":
+                return SimpleNamespace(returncode=1)
+            return SimpleNamespace(returncode=0)
+
+        original_time = scheduler_service.settings.scheduled_run_time
+        original_retry_enabled = scheduler_service.settings.scheduled_retry_failed_enabled
+        original_retry_limit = scheduler_service.settings.scheduled_retry_failed_limit
+        scheduler_service.settings.scheduled_run_time = "09:30"
+        scheduler_service.settings.scheduled_retry_failed_enabled = True
+        scheduler_service.settings.scheduled_retry_failed_limit = 15
+        try:
+            original_sleep_until = scheduler_service.sleep_until
+            scheduler_service.sleep_until = lambda target, *, now_fn, sleep_fn: None
+            try:
+                result = scheduler_service.run_scheduled_crawl_loop(
+                    stop_after_runs=1,
+                    now_fn=lambda: datetime(2026, 4, 29, 8, 0, 0),
+                    sleep_fn=lambda _seconds: None,
+                    command_runner=fake_command_runner,
+                    python_executable="python",
+                )
+            finally:
+                scheduler_service.sleep_until = original_sleep_until
+        finally:
+            scheduler_service.settings.scheduled_run_time = original_time
+            scheduler_service.settings.scheduled_retry_failed_enabled = original_retry_enabled
+            scheduler_service.settings.scheduled_retry_failed_limit = original_retry_limit
+
+        self.assertEqual(result, 0)
+        self.assertEqual(len(commands), 2)
+        self.assertEqual(commands[0][0][-2:], ["doctor", "--strict"])
+        self.assertEqual(commands[1][0][-1], "crawl-following")

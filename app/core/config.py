@@ -103,6 +103,13 @@ class Settings(BaseSettings):
     # 每天几点开始执行定时抓取，24 小时制，格式固定为 HH:MM。
     scheduled_run_time: str = "02:00"
 
+    # 是否在定时更新成功后，再自动补跑一次失败重试。
+    scheduled_retry_failed_enabled: bool = False
+
+    # 定时补跑失败重试时，最多处理多少条失败记录。
+    # 0 表示不处理任何失败记录；通常建议配一个有限值，避免单次补偿拖太久。
+    scheduled_retry_failed_limit: int = 20
+
     @field_validator("scheduled_run_time")
     @classmethod
     def validate_scheduled_run_time(cls, value: str) -> str:
@@ -117,6 +124,13 @@ class Settings(BaseSettings):
             raise ValueError("SCHEDULED_RUN_TIME 必须是有效的 24 小时制时间。")
 
         return f"{hour:02d}:{minute:02d}"
+
+    @field_validator("scheduled_retry_failed_limit")
+    @classmethod
+    def validate_scheduled_retry_failed_limit(cls, value: int) -> int:
+        if int(value) < 0:
+            raise ValueError("SCHEDULED_RETRY_FAILED_LIMIT 不能小于 0。")
+        return int(value)
 
     # 告诉 pydantic-settings 去哪里读取配置。
     model_config = SettingsConfigDict(
