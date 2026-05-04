@@ -201,6 +201,52 @@ class TaskServiceTestCase(unittest.TestCase):
         self.assertEqual(record["status"], "completed")
         self.assertEqual(record["downloaded_files"], [str(Path(temp_dir) / "redownloaded.jpg")])
 
+    def test_process_artwork_batch_reprocesses_completed_record_when_file_is_empty(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repository = DownloadRecordRepository(f"{temp_dir}/pixiv.db")
+            repository.initialize()
+            empty_file = Path(temp_dir) / "empty.jpg"
+            empty_file.write_bytes(b"")
+            repository.upsert_record(
+                "100",
+                status="completed",
+                error_type="",
+                title="old",
+                author_name="author",
+                page_count=1,
+                download_count=1,
+                saved_html="./data/temp/html/artwork_100.html",
+                saved_json="./data/temp/json/artwork_100.json",
+                downloaded_files=[str(empty_file)],
+            )
+
+            expected_result = {
+                "artwork_id": "100",
+                "title": "new",
+                "author_name": "author",
+                "page_count": 1,
+                "download_count": 1,
+                "saved_html": "./data/temp/html/artwork_100.html",
+                "saved_json": "./data/temp/json/artwork_100.json",
+                "downloaded_files": [str(Path(temp_dir) / "redownloaded.jpg")],
+                "skipped_download": False,
+                "skipped_by_db": False,
+            }
+
+            with patch("app.services.task_service.process_artwork", return_value=expected_result) as mocked:
+                with patch.object(task_service, "logger"):
+                    summary = process_artwork_batch(
+                        ["100"],
+                        crawler=object(),
+                        downloader=object(),
+                        record_repository=repository,
+                    )
+
+        self.assertEqual(len(summary["success_results"]), 1)
+        self.assertEqual(summary["success_results"][0]["title"], "new")
+        self.assertEqual(summary["failed_results"], [])
+        mocked.assert_called_once()
+
     def test_process_artwork_batch_reuses_completed_record_when_files_exist(self) -> None:
         with TemporaryDirectory() as temp_dir:
             repository = DownloadRecordRepository(f"{temp_dir}/pixiv.db")

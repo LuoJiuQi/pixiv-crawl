@@ -18,6 +18,7 @@ from app.core.config import settings
 from app.core.logging_config import get_logger
 from app.crawler.artwork_crawler import ArtworkCrawler
 from app.db.download_record_repository import DownloadRecord, DownloadRecordRepository
+from app.downloader.download_path_builder import is_complete_download_file
 from app.downloader.image_downloader import PixivImageDownloader
 from app.parser.artwork_parser import ArtworkParser
 from app.schemas.task import BatchRunSummary, FailedResult, IncrementalSelectionResult, ProcessResult
@@ -209,7 +210,7 @@ def _completed_record_files_exist(existing_record: DownloadRecord) -> bool:
         return False
 
     for file_path in downloaded_files:
-        if not Path(str(file_path)).exists():
+        if not is_complete_download_file(Path(str(file_path))):
             return False
 
     return True

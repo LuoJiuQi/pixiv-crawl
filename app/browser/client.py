@@ -16,6 +16,8 @@
 你可以把它理解成整个爬虫项目的“浏览器底座”。
 """
 
+from typing import Any
+
 from playwright.sync_api import Browser, BrowserContext, Page, Playwright, sync_playwright
 from playwright._impl._api_structures import ProxySettings, StorageState
 

@@ -202,6 +202,30 @@ class PixivImageDownloaderTestCase(unittest.TestCase):
         self.assertFalse(is_downloaded)
         self.assertEqual(existing_files, [])
 
+    def test_is_artwork_downloaded_returns_false_for_partial_or_empty_files(self) -> None:
+        artwork = ArtworkInfo(
+            artwork_id="123456789",
+            user_id="998877",
+            author_name="mignon",
+            title="制服まとめ",
+            page_count=1,
+            possible_image_urls=[
+                "https://i.pximg.net/img-original/img/2026/03/20/15/42/15/123456789_p0.jpg",
+            ],
+        )
+
+        with TemporaryDirectory() as temp_dir:
+            downloader = LocalOnlyDownloader(make_dummy_client(), download_dir=temp_dir)
+            author_dir = Path(temp_dir) / downloader._build_author_folder_name(artwork)
+            author_dir.mkdir(parents=True, exist_ok=True)
+            (author_dir / "制服まとめ__123456789.jpg.part").write_bytes(b"partial")
+            (author_dir / "制服まとめ__123456789.png").write_bytes(b"")
+
+            is_downloaded, existing_files = downloader.is_artwork_downloaded(artwork)
+
+        self.assertFalse(is_downloaded)
+        self.assertEqual(existing_files, [])
+
     def test_download_artwork_streams_response_body_to_disk(self) -> None:
         artwork = ArtworkInfo(
             artwork_id="123456789",
@@ -258,6 +282,120 @@ class PixivImageDownloaderTestCase(unittest.TestCase):
 
         self.assertEqual(saved_bytes, b"chunk1chunk2")
         self.assertEqual(saved_path.suffix, ".jpg")
+
+    def test_download_artwork_rejects_empty_response_and_removes_partial_file(self) -> None:
+        artwork = ArtworkInfo(
+            artwork_id="123456789",
+            user_id="998877",
+            author_name="mignon",
+            title="制服まとめ",
+            page_count=1,
+            canonical_url="https://www.pixiv.net/artworks/123456789",
+            possible_image_urls=[
+                "https://i.pximg.net/img-original/img/2026/03/20/15/42/15/123456789_p0.jpg",
+            ],
+        )
+
+        class EmptyResponse:
+            def __init__(self) -> None:
+                self.headers = {"content-type": "image/jpeg", "content-length": "0"}
+                self.url = artwork.possible_image_urls[0]
+
+            def raise_for_status(self) -> None:
+                return None
+
+            def iter_bytes(self) -> list[bytes]:
+                return []
+
+        class FakeStreamContext:
+            def __enter__(self):
+                return EmptyResponse()
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class FakeHttpClient:
+            def __init__(self, **kwargs):
+                self.kwargs = kwargs
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def stream(self, method: str, url: str):
+                return FakeStreamContext()
+
+        with TemporaryDirectory() as temp_dir:
+            downloader = StreamFriendlyDownloader(make_dummy_client(), download_dir=temp_dir)
+
+            with patch("app.downloader.image_downloader.httpx.Client", FakeHttpClient), self.assertRaisesRegex(
+                RuntimeError,
+                "下载结果为空文件",
+            ):
+                downloader.download_artwork(artwork)
+
+            part_files = list(Path(temp_dir).rglob("*.part"))
+
+        self.assertEqual(part_files, [])
+
+    def test_download_artwork_rejects_content_length_mismatch_and_removes_partial_file(self) -> None:
+        artwork = ArtworkInfo(
+            artwork_id="123456789",
+            user_id="998877",
+            author_name="mignon",
+            title="制服まとめ",
+            page_count=1,
+            canonical_url="https://www.pixiv.net/artworks/123456789",
+            possible_image_urls=[
+                "https://i.pximg.net/img-original/img/2026/03/20/15/42/15/123456789_p0.jpg",
+            ],
+        )
+
+        class MismatchedResponse:
+            def __init__(self) -> None:
+                self.headers = {"content-type": "image/jpeg", "content-length": "10"}
+                self.url = artwork.possible_image_urls[0]
+
+            def raise_for_status(self) -> None:
+                return None
+
+            def iter_bytes(self) -> list[bytes]:
+                return [b"short"]
+
+        class FakeStreamContext:
+            def __enter__(self):
+                return MismatchedResponse()
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class FakeHttpClient:
+            def __init__(self, **kwargs):
+                self.kwargs = kwargs
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def stream(self, method: str, url: str):
+                return FakeStreamContext()
+
+        with TemporaryDirectory() as temp_dir:
+            downloader = StreamFriendlyDownloader(make_dummy_client(), download_dir=temp_dir)
+
+            with patch("app.downloader.image_downloader.httpx.Client", FakeHttpClient), self.assertRaisesRegex(
+                RuntimeError,
+                "下载文件大小不匹配",
+            ):
+                downloader.download_artwork(artwork)
+
+            part_files = list(Path(temp_dir).rglob("*.part"))
+
+        self.assertEqual(part_files, [])
 
     def test_download_artwork_retries_retryable_http_status_before_succeeding(self) -> None:
         artwork = ArtworkInfo(

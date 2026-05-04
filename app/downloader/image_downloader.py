@@ -181,6 +181,18 @@ class PixivImageDownloader:
         retry_delay = (retry_at.timestamp() - time.time())
         return max(0.0, retry_delay)
 
+    def _parse_content_length(self, content_length_value: str | None) -> int | None:
+        raw_value = (content_length_value or "").strip()
+        if not raw_value:
+            return None
+
+        try:
+            content_length = int(raw_value)
+        except ValueError:
+            return None
+
+        return content_length if content_length >= 0 else None
+
     def _get_retry_delay(self, attempt_index: int, exc: Exception) -> float:
         if isinstance(exc, httpx.HTTPStatusError):
             retry_after_seconds = self._parse_retry_after_seconds(
@@ -235,10 +247,25 @@ class PixivImageDownloader:
                     )
                     temp_output_path = output_path.with_name(f"{output_path.name}.part")
 
+                    expected_size = self._parse_content_length(response.headers.get("content-length"))
+                    written_size = 0
                     with temp_output_path.open("wb") as output_file:
                         for chunk in response.iter_bytes():
                             if chunk:
+                                written_size += len(chunk)
                                 output_file.write(chunk)
+
+                    if written_size <= 0:
+                        raise RuntimeError(
+                            f"下载结果为空文件，作品 ID: {artwork.artwork_id}, URL: {url}"
+                        )
+
+                    if expected_size is not None and written_size != expected_size:
+                        raise RuntimeError(
+                            "下载文件大小不匹配，"
+                            f"作品 ID: {artwork.artwork_id}, URL: {url}, "
+                            f"预期: {expected_size} 字节，实际: {written_size} 字节"
+                        )
 
                     temp_output_path.replace(output_path)
                     return str(output_path)

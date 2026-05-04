@@ -18,6 +18,9 @@ class FailureClassifierTestCase(unittest.TestCase):
     def test_classify_download_error(self) -> None:
         self.assertEqual(classify_failure("未找到可下载图片 URL，作品 ID: 123"), "download")
 
+    def test_classify_incomplete_download_error(self) -> None:
+        self.assertEqual(classify_failure("下载文件大小不匹配，预期: 10 字节，实际: 5 字节"), "download")
+
     def test_classify_rate_limit_http_status_error(self) -> None:
         request = httpx.Request("GET", "https://i.pximg.net/image.jpg")
         response = httpx.Response(429, request=request)

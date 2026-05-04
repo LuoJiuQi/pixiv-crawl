@@ -6,6 +6,27 @@ from urllib.parse import urlparse
 from app.schemas.artwork import ArtworkInfo
 
 
+PARTIAL_DOWNLOAD_SUFFIX = ".part"
+
+
+def is_complete_download_file(path: Path) -> bool:
+    """
+    判断本地文件是否可以被视为已经完成的下载结果。
+
+    这里刻意只做低风险的通用校验：
+    - 必须是普通文件
+    - 不能是临时 `.part` 文件
+    - 文件大小必须大于 0
+    """
+    if path.suffix.lower() == PARTIAL_DOWNLOAD_SUFFIX:
+        return False
+
+    try:
+        return path.is_file() and path.stat().st_size > 0
+    except OSError:
+        return False
+
+
 class DownloadPathBuilder:
     """
     负责下载文件的本地路径和文件名规则。
@@ -97,12 +118,16 @@ class DownloadPathBuilder:
         total_pages: int,
     ) -> Path | None:
         """
-        查找某一页是否已经存在任意扩展名的本地文件。
+        查找某一页是否已经存在任意扩展名的完整本地文件。
         """
         author_dir = self.download_dir / self.build_author_folder_name(artwork)
         if not author_dir.exists():
             return None
 
         stem = self.build_file_stem(artwork, page_index, total_pages=total_pages)
-        matches = sorted(author_dir.glob(f"{stem}.*"))
+        matches = sorted(
+            path
+            for path in author_dir.glob(f"{stem}.*")
+            if is_complete_download_file(path)
+        )
         return matches[0] if matches else None

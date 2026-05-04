@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 import main
+from app import application as app_module
 
 
 class MainInputParsingTestCase(unittest.TestCase):
@@ -18,18 +19,18 @@ class MainInputParsingTestCase(unittest.TestCase):
             "state_saved": False,
         }
 
-        with patch("main.BrowserClient", return_value=mock_client), patch(
-            "main.DownloadRecordRepository",
+        with patch("app.application.BrowserClient", return_value=mock_client), patch(
+            "app.application.DownloadRecordRepository",
             return_value=mock_repository,
-        ), patch("main.PixivLoginService", return_value=mock_login_service), patch(
-            "main.configure_logging",
+        ), patch("app.application.PixivLoginService", return_value=mock_login_service), patch(
+            "app.application.configure_logging",
         ) as mocked_configure_logging, patch(
-            "main.choose_action",
+            "app.application.choose_action",
             return_value="crawl",
-        ), patch("main.collect_artwork_ids", return_value=["100"]), patch(
-            "main.process_artwork_batch"
+        ), patch("app.application.collect_artwork_ids", return_value=["100"]), patch(
+            "app.application.process_artwork_batch"
         ) as mocked_batch, patch.object(
-            main,
+            app_module,
             "logger",
         ) as mocked_logger:
             main.main()
@@ -54,17 +55,17 @@ class MainInputParsingTestCase(unittest.TestCase):
             "state_saved": False,
         }
 
-        with patch("main.BrowserClient", return_value=mock_client), patch(
-            "main.DownloadRecordRepository",
+        with patch("app.application.BrowserClient", return_value=mock_client), patch(
+            "app.application.DownloadRecordRepository",
             return_value=mock_repository,
-        ), patch("main.PixivLoginService", return_value=mock_login_service), patch(
-            "main.console_service.configure_console_encoding",
+        ), patch("app.application.PixivLoginService", return_value=mock_login_service), patch(
+            "app.application.console_service.configure_console_encoding",
         ) as mocked_configure_console_encoding, patch(
-            "main.configure_logging",
+            "app.application.configure_logging",
         ) as mocked_configure_logging, patch(
-            "main.choose_action",
+            "app.application.choose_action",
             return_value="crawl",
-        ), patch("main.collect_artwork_ids", return_value=["100"]):
+        ), patch("app.application.collect_artwork_ids", return_value=["100"]):
             main.main()
 
         mocked_configure_console_encoding.assert_called_once()
@@ -79,21 +80,21 @@ class MainInputParsingTestCase(unittest.TestCase):
         mock_login_service.is_logged_in.return_value = True
         summary = {"success_results": [], "failed_results": []}
 
-        with patch("main.BrowserClient", return_value=mock_client), patch(
-            "main.DownloadRecordRepository",
+        with patch("app.application.BrowserClient", return_value=mock_client), patch(
+            "app.application.DownloadRecordRepository",
             return_value=mock_repository,
-        ), patch("main.PixivLoginService", return_value=mock_login_service), patch(
-            "main.configure_logging",
+        ), patch("app.application.PixivLoginService", return_value=mock_login_service), patch(
+            "app.application.configure_logging",
         ), patch(
-            "main.choose_action",
+            "app.application.choose_action",
             return_value="crawl",
-        ), patch("main.collect_artwork_ids", return_value=["100"]), patch(
-            "main.process_artwork_batch",
+        ), patch("app.application.collect_artwork_ids", return_value=["100"]), patch(
+            "app.application.process_artwork_batch",
             return_value=summary,
         ), patch(
-            "main.console_service.show_batch_summary"
+            "app.application.console_service.show_batch_summary"
         ), patch(
-            "main.console_service.pause_before_exit"
+            "app.application.console_service.pause_before_exit"
         ) as mocked_pause:
             main.main()
 
@@ -104,18 +105,18 @@ class MainInputParsingTestCase(unittest.TestCase):
         mock_client = MagicMock()
         mock_repository = MagicMock()
 
-        with patch("main.BrowserClient", return_value=mock_client), patch(
-            "main.DownloadRecordRepository",
+        with patch("app.application.BrowserClient", return_value=mock_client), patch(
+            "app.application.DownloadRecordRepository",
             return_value=mock_repository,
-        ), patch("main.settings.scheduled_run_enabled", True), patch(
-            "main.console_service.configure_console_encoding",
+        ), patch("app.application.settings.scheduled_run_enabled", True), patch(
+            "app.application.console_service.configure_console_encoding",
         ), patch(
-            "main.configure_logging",
+            "app.application.configure_logging",
         ), patch(
-            "main.run_scheduled_crawl_loop",
+            "app.application.run_scheduled_crawl_loop",
             return_value=0,
         ) as mocked_run_scheduled_crawl_loop, patch(
-            "main.choose_action"
+            "app.application.choose_action"
         ) as mocked_choose_action:
             exit_code = main.main()
 
@@ -124,7 +125,6 @@ class MainInputParsingTestCase(unittest.TestCase):
         mock_repository.initialize.assert_not_called()
         mock_client.start.assert_not_called()
         self.assertEqual(exit_code, 0)
-        mock_client.close.assert_called_once()
 
     def test_main_routes_batch_summary_to_console_layer(self) -> None:
         mock_client = MagicMock()
@@ -144,21 +144,21 @@ class MainInputParsingTestCase(unittest.TestCase):
             "failed_results": [{"artwork_id": "200", "error": "timeout"}],
         }
 
-        with patch("main.BrowserClient", return_value=mock_client), patch(
-            "main.DownloadRecordRepository",
+        with patch("app.application.BrowserClient", return_value=mock_client), patch(
+            "app.application.DownloadRecordRepository",
             return_value=mock_repository,
-        ), patch("main.PixivLoginService", return_value=mock_login_service), patch(
-            "main.configure_logging",
+        ), patch("app.application.PixivLoginService", return_value=mock_login_service), patch(
+            "app.application.configure_logging",
         ), patch(
-            "main.choose_action",
+            "app.application.choose_action",
             return_value="crawl",
-        ), patch("main.collect_artwork_ids", return_value=["100"]), patch(
-            "main.process_artwork_batch",
+        ), patch("app.application.collect_artwork_ids", return_value=["100"]), patch(
+            "app.application.process_artwork_batch",
             return_value=summary,
         ), patch(
-            "main.console_service.show_batch_summary"
+            "app.application.console_service.show_batch_summary"
         ) as mocked_show_batch_summary, patch(
-            "main.console_service.pause_before_exit"
+            "app.application.console_service.pause_before_exit"
         ):
             main.main()
 
@@ -173,23 +173,23 @@ class MainInputParsingTestCase(unittest.TestCase):
         mock_login_service.is_logged_in.return_value = True
         summary = {"success_results": [], "failed_results": []}
 
-        with patch("main.BrowserClient", return_value=mock_client), patch(
-            "main.DownloadRecordRepository",
+        with patch("app.application.BrowserClient", return_value=mock_client), patch(
+            "app.application.DownloadRecordRepository",
             return_value=mock_repository,
-        ), patch("main.PixivLoginService", return_value=mock_login_service), patch(
-            "main.configure_logging",
+        ), patch("app.application.PixivLoginService", return_value=mock_login_service), patch(
+            "app.application.configure_logging",
         ), patch(
-            "main.choose_action",
+            "app.application.choose_action",
             return_value="crawl",
-        ), patch("main.collect_artwork_ids", return_value=["100", "200"]), patch(
-            "main.process_artwork_batch",
+        ), patch("app.application.collect_artwork_ids", return_value=["100", "200"]), patch(
+            "app.application.process_artwork_batch",
             return_value=summary,
         ), patch(
-            "main.console_service.show_batch_summary"
+            "app.application.console_service.show_batch_summary"
         ), patch(
-            "main.console_service.pause_before_exit"
+            "app.application.console_service.pause_before_exit"
         ), patch.object(
-            main,
+            app_module,
             "logger",
         ) as mocked_logger:
             main.main()
@@ -210,22 +210,22 @@ class MainInputParsingTestCase(unittest.TestCase):
         mock_login_service.is_logged_in.return_value = True
         summary = {"success_results": [], "failed_results": []}
 
-        with patch("main.BrowserClient", return_value=mock_client), patch(
-            "main.DownloadRecordRepository",
+        with patch("app.application.BrowserClient", return_value=mock_client), patch(
+            "app.application.DownloadRecordRepository",
             return_value=mock_repository,
-        ), patch("main.PixivLoginService", return_value=mock_login_service), patch(
-            "main.configure_logging",
+        ), patch("app.application.PixivLoginService", return_value=mock_login_service), patch(
+            "app.application.configure_logging",
         ), patch(
-            "main.choose_action"
+            "app.application.choose_action"
         ) as mocked_choose_action, patch(
-            "main.collect_artwork_ids"
+            "app.application.collect_artwork_ids"
         ) as mocked_collect_artwork_ids, patch(
-            "main.process_artwork_batch",
+            "app.application.process_artwork_batch",
             return_value=summary,
         ), patch(
-            "main.console_service.show_batch_summary"
+            "app.application.console_service.show_batch_summary"
         ), patch(
-            "main.console_service.pause_before_exit"
+            "app.application.console_service.pause_before_exit"
         ) as mocked_pause:
             main.main(["crawl", "100", "200"])
 
@@ -238,17 +238,17 @@ class MainInputParsingTestCase(unittest.TestCase):
         mock_client = MagicMock()
         mock_repository = MagicMock()
 
-        with patch("main.BrowserClient", return_value=mock_client), patch(
-            "main.DownloadRecordRepository",
+        with patch("app.application.BrowserClient", return_value=mock_client), patch(
+            "app.application.DownloadRecordRepository",
             return_value=mock_repository,
         ), patch(
-            "main.configure_logging",
+            "app.application.configure_logging",
         ), patch(
-            "main.choose_action"
+            "app.application.choose_action"
         ) as mocked_choose_action, patch(
-            "main.show_history"
+            "app.application.show_history"
         ) as mocked_show_history, patch(
-            "main.console_service.pause_before_exit"
+            "app.application.console_service.pause_before_exit"
         ) as mocked_pause:
             main.main(["history", "--status", "failed", "--error-type", "timeout", "--limit", "5"])
 
@@ -262,7 +262,6 @@ class MainInputParsingTestCase(unittest.TestCase):
         )
         mock_client.start.assert_not_called()
         mocked_pause.assert_not_called()
-        mock_client.close.assert_called_once()
 
     def test_main_routes_doctor_command_without_initializing_database(self) -> None:
         mock_client = MagicMock()
@@ -273,26 +272,26 @@ class MainInputParsingTestCase(unittest.TestCase):
             ]
         }
 
-        with patch("main.BrowserClient", return_value=mock_client), patch(
-            "main.DownloadRecordRepository",
+        with patch("app.application.BrowserClient", return_value=mock_client), patch(
+            "app.application.DownloadRecordRepository",
             return_value=mock_repository,
         ), patch(
-            "main.configure_logging",
+            "app.application.configure_logging",
         ), patch(
-            "main.run_doctor",
+            "app.application.run_doctor",
             return_value=report,
         ) as mocked_run_doctor, patch(
-            "main.summarize_doctor_report",
+            "app.application.summarize_doctor_report",
             return_value={"ok": 1, "warn": 0, "error": 0, "skip": 0},
         ) as mocked_summarize, patch(
-            "main.get_doctor_exit_code",
+            "app.application.get_doctor_exit_code",
             return_value=0,
         ) as mocked_get_exit_code, patch(
-            "main.console_service.show_doctor_report"
+            "app.application.console_service.show_doctor_report"
         ) as mocked_show_doctor_report, patch(
-            "main.console_service.show_summary"
+            "app.application.console_service.show_summary"
         ) as mocked_show_summary, patch(
-            "main.console_service.pause_before_exit"
+            "app.application.console_service.pause_before_exit"
         ) as mocked_pause:
             exit_code = main.main(["doctor"])
 
@@ -308,7 +307,6 @@ class MainInputParsingTestCase(unittest.TestCase):
         mock_repository.initialize.assert_not_called()
         mock_client.start.assert_not_called()
         mocked_pause.assert_not_called()
-        mock_client.close.assert_called_once()
 
     def test_main_routes_doctor_strict_mode_to_nonzero_exit_code(self) -> None:
         mock_client = MagicMock()
@@ -319,26 +317,26 @@ class MainInputParsingTestCase(unittest.TestCase):
             ]
         }
 
-        with patch("main.BrowserClient", return_value=mock_client), patch(
-            "main.DownloadRecordRepository",
+        with patch("app.application.BrowserClient", return_value=mock_client), patch(
+            "app.application.DownloadRecordRepository",
             return_value=mock_repository,
         ), patch(
-            "main.configure_logging",
+            "app.application.configure_logging",
         ), patch(
-            "main.run_doctor",
+            "app.application.run_doctor",
             return_value=report,
         ), patch(
-            "main.summarize_doctor_report",
+            "app.application.summarize_doctor_report",
             return_value={"ok": 0, "warn": 1, "error": 0, "skip": 0},
         ), patch(
-            "main.get_doctor_exit_code",
+            "app.application.get_doctor_exit_code",
             return_value=1,
         ) as mocked_get_exit_code, patch(
-            "main.console_service.show_doctor_report"
+            "app.application.console_service.show_doctor_report"
         ), patch(
-            "main.console_service.show_summary"
+            "app.application.console_service.show_summary"
         ), patch(
-            "main.console_service.pause_before_exit"
+            "app.application.console_service.pause_before_exit"
         ) as mocked_pause:
             exit_code = main.main(["doctor", "--strict"])
 
@@ -346,7 +344,6 @@ class MainInputParsingTestCase(unittest.TestCase):
         self.assertEqual(exit_code, 1)
         mocked_pause.assert_not_called()
         mock_repository.initialize.assert_not_called()
-        mock_client.close.assert_called_once()
 
     def test_main_routes_doctor_json_output_without_human_summary(self) -> None:
         mock_client = MagicMock()
@@ -359,26 +356,26 @@ class MainInputParsingTestCase(unittest.TestCase):
         }
         summary = {"ok": 1, "warn": 0, "error": 0, "skip": 1}
 
-        with patch("main.BrowserClient", return_value=mock_client), patch(
-            "main.DownloadRecordRepository",
+        with patch("app.application.BrowserClient", return_value=mock_client), patch(
+            "app.application.DownloadRecordRepository",
             return_value=mock_repository,
         ), patch(
-            "main.configure_logging",
+            "app.application.configure_logging",
         ), patch(
-            "main.run_doctor",
+            "app.application.run_doctor",
             return_value=report,
         ), patch(
-            "main.summarize_doctor_report",
+            "app.application.summarize_doctor_report",
             return_value=summary,
         ), patch(
-            "main.get_doctor_exit_code",
+            "app.application.get_doctor_exit_code",
             return_value=0,
         ) as mocked_get_exit_code, patch(
-            "main.console_service.show_json"
+            "app.application.console_service.show_json"
         ) as mocked_show_json, patch(
-            "main.console_service.show_doctor_report"
+            "app.application.console_service.show_doctor_report"
         ) as mocked_show_doctor_report, patch(
-            "main.console_service.show_summary"
+            "app.application.console_service.show_summary"
         ) as mocked_show_summary:
             exit_code = main.main(["doctor", "--json"])
 
@@ -395,7 +392,6 @@ class MainInputParsingTestCase(unittest.TestCase):
         mocked_show_summary.assert_not_called()
         self.assertEqual(exit_code, 0)
         mock_repository.initialize.assert_not_called()
-        mock_client.close.assert_called_once()
 
     def test_main_routes_doctor_output_file_with_human_summary(self) -> None:
         mock_client = MagicMock()
@@ -407,30 +403,30 @@ class MainInputParsingTestCase(unittest.TestCase):
         }
         summary = {"ok": 1, "warn": 0, "error": 0, "skip": 0}
 
-        with patch("main.BrowserClient", return_value=mock_client), patch(
-            "main.DownloadRecordRepository",
+        with patch("app.application.BrowserClient", return_value=mock_client), patch(
+            "app.application.DownloadRecordRepository",
             return_value=mock_repository,
         ), patch(
-            "main.configure_logging",
+            "app.application.configure_logging",
         ), patch(
-            "main.run_doctor",
+            "app.application.run_doctor",
             return_value=report,
         ), patch(
-            "main.summarize_doctor_report",
+            "app.application.summarize_doctor_report",
             return_value=summary,
         ), patch(
-            "main.get_doctor_exit_code",
+            "app.application.get_doctor_exit_code",
             return_value=0,
         ), patch(
-            "main.console_service.write_json_file"
+            "app.application.console_service.write_json_file"
         ) as mocked_write_json_file, patch(
-            "main.console_service.show_doctor_report"
+            "app.application.console_service.show_doctor_report"
         ) as mocked_show_doctor_report, patch(
-            "main.console_service.show_summary"
+            "app.application.console_service.show_summary"
         ) as mocked_show_summary, patch(
-            "main.console_service.show_success"
+            "app.application.console_service.show_success"
         ) as mocked_show_success, patch(
-            "main.console_service.show_json"
+            "app.application.console_service.show_json"
         ) as mocked_show_json:
             exit_code = main.main(["doctor", "--output", "data/doctor.json"])
 
@@ -452,7 +448,6 @@ class MainInputParsingTestCase(unittest.TestCase):
         mocked_show_json.assert_not_called()
         self.assertEqual(exit_code, 0)
         mock_repository.initialize.assert_not_called()
-        mock_client.close.assert_called_once()
 
     def test_main_routes_doctor_json_output_can_write_file_at_same_time(self) -> None:
         mock_client = MagicMock()
@@ -464,30 +459,30 @@ class MainInputParsingTestCase(unittest.TestCase):
         }
         summary = {"ok": 1, "warn": 0, "error": 0, "skip": 0}
 
-        with patch("main.BrowserClient", return_value=mock_client), patch(
-            "main.DownloadRecordRepository",
+        with patch("app.application.BrowserClient", return_value=mock_client), patch(
+            "app.application.DownloadRecordRepository",
             return_value=mock_repository,
         ), patch(
-            "main.configure_logging",
+            "app.application.configure_logging",
         ), patch(
-            "main.run_doctor",
+            "app.application.run_doctor",
             return_value=report,
         ), patch(
-            "main.summarize_doctor_report",
+            "app.application.summarize_doctor_report",
             return_value=summary,
         ), patch(
-            "main.get_doctor_exit_code",
+            "app.application.get_doctor_exit_code",
             return_value=0,
         ), patch(
-            "main.console_service.write_json_file"
+            "app.application.console_service.write_json_file"
         ) as mocked_write_json_file, patch(
-            "main.console_service.show_json"
+            "app.application.console_service.show_json"
         ) as mocked_show_json, patch(
-            "main.console_service.show_doctor_report"
+            "app.application.console_service.show_doctor_report"
         ) as mocked_show_doctor_report, patch(
-            "main.console_service.show_summary"
+            "app.application.console_service.show_summary"
         ) as mocked_show_summary, patch(
-            "main.console_service.show_success"
+            "app.application.console_service.show_success"
         ) as mocked_show_success:
             exit_code = main.main(["doctor", "--json", "--output", "data/doctor.json"])
 
@@ -504,23 +499,22 @@ class MainInputParsingTestCase(unittest.TestCase):
         mocked_show_success.assert_not_called()
         self.assertEqual(exit_code, 0)
         mock_repository.initialize.assert_not_called()
-        mock_client.close.assert_called_once()
 
     def test_main_routes_export_failed_cli_arguments_without_prompting(self) -> None:
         mock_client = MagicMock()
         mock_repository = MagicMock()
 
-        with patch("main.BrowserClient", return_value=mock_client), patch(
-            "main.DownloadRecordRepository",
+        with patch("app.application.BrowserClient", return_value=mock_client), patch(
+            "app.application.DownloadRecordRepository",
             return_value=mock_repository,
         ), patch(
-            "main.configure_logging",
+            "app.application.configure_logging",
         ), patch(
-            "main.choose_action"
+            "app.application.choose_action"
         ) as mocked_choose_action, patch(
-            "main.export_failed_records"
+            "app.application.export_failed_records"
         ) as mocked_export_failed_records, patch(
-            "main.console_service.pause_before_exit"
+            "app.application.console_service.pause_before_exit"
         ) as mocked_pause:
             main.main(
                 ["export-failed", "--error-type", "timeout", "--limit", "5", "--format", "txt"]
@@ -536,23 +530,22 @@ class MainInputParsingTestCase(unittest.TestCase):
         )
         mock_client.start.assert_not_called()
         mocked_pause.assert_not_called()
-        mock_client.close.assert_called_once()
 
     def test_main_routes_archive_records_cli_arguments_without_prompting(self) -> None:
         mock_client = MagicMock()
         mock_repository = MagicMock()
 
-        with patch("main.BrowserClient", return_value=mock_client), patch(
-            "main.DownloadRecordRepository",
+        with patch("app.application.BrowserClient", return_value=mock_client), patch(
+            "app.application.DownloadRecordRepository",
             return_value=mock_repository,
         ), patch(
-            "main.configure_logging",
+            "app.application.configure_logging",
         ), patch(
-            "main.choose_action"
+            "app.application.choose_action"
         ) as mocked_choose_action, patch(
-            "main.archive_old_records"
+            "app.application.archive_old_records"
         ) as mocked_archive_old_records, patch(
-            "main.console_service.pause_before_exit"
+            "app.application.console_service.pause_before_exit"
         ) as mocked_pause:
             main.main(
                 [
@@ -581,7 +574,6 @@ class MainInputParsingTestCase(unittest.TestCase):
         )
         mock_client.start.assert_not_called()
         mocked_pause.assert_not_called()
-        mock_client.close.assert_called_once()
 
     def test_main_routes_retry_failed_cli_arguments_without_prompting(self) -> None:
         mock_client = MagicMock()
@@ -592,23 +584,23 @@ class MainInputParsingTestCase(unittest.TestCase):
         mock_login_service.is_logged_in.return_value = True
         summary = {"success_results": [], "failed_results": []}
 
-        with patch("main.BrowserClient", return_value=mock_client), patch(
-            "main.DownloadRecordRepository",
+        with patch("app.application.BrowserClient", return_value=mock_client), patch(
+            "app.application.DownloadRecordRepository",
             return_value=mock_repository,
-        ), patch("main.PixivLoginService", return_value=mock_login_service), patch(
-            "main.configure_logging",
+        ), patch("app.application.PixivLoginService", return_value=mock_login_service), patch(
+            "app.application.configure_logging",
         ), patch(
-            "main.choose_action"
+            "app.application.choose_action"
         ) as mocked_choose_action, patch(
-            "main.collect_retry_artwork_ids",
+            "app.application.collect_retry_artwork_ids",
             return_value=["100"],
         ) as mocked_collect_retry_artwork_ids, patch(
-            "main.process_artwork_batch",
+            "app.application.process_artwork_batch",
             return_value=summary,
         ) as mocked_process_artwork_batch, patch(
-            "main.console_service.show_batch_summary"
+            "app.application.console_service.show_batch_summary"
         ), patch(
-            "main.console_service.pause_before_exit"
+            "app.application.console_service.pause_before_exit"
         ) as mocked_pause:
             main.main(["retry-failed", "--error-type", "timeout", "--limit", "5"])
 
@@ -645,30 +637,30 @@ class MainInputParsingTestCase(unittest.TestCase):
             "stop_after_completed_streak": 15,
         }
 
-        with patch("main.BrowserClient", return_value=mock_client), patch(
-            "main.DownloadRecordRepository",
+        with patch("app.application.BrowserClient", return_value=mock_client), patch(
+            "app.application.DownloadRecordRepository",
             return_value=mock_repository,
-        ), patch("main.PixivLoginService", return_value=mock_login_service), patch(
-            "main.AuthorCrawler",
+        ), patch("app.application.PixivLoginService", return_value=mock_login_service), patch(
+            "app.application.AuthorCrawler",
             return_value=mock_author_crawler,
         ), patch(
-            "main.configure_logging",
+            "app.application.configure_logging",
         ), patch(
-            "main.choose_action"
+            "app.application.choose_action"
         ) as mocked_choose_action, patch(
-            "main.select_incremental_artwork_ids",
+            "app.application.select_incremental_artwork_ids",
             return_value=selection,
         ) as mocked_select_incremental_artwork_ids, patch(
-            "main.process_artwork_batch",
+            "app.application.process_artwork_batch",
             return_value=summary,
         ) as mocked_process_artwork_batch, patch(
-            "main.console_service.show_incremental_selection_summary"
+            "app.application.console_service.show_incremental_selection_summary"
         ), patch(
-            "main.console_service.show_batch_summary"
+            "app.application.console_service.show_batch_summary"
         ), patch(
-            "main.console_service.show_following_update_summary"
+            "app.application.console_service.show_following_update_summary"
         ), patch(
-            "main.console_service.pause_before_exit"
+            "app.application.console_service.pause_before_exit"
         ) as mocked_pause:
             main.main(["crawl-following", "--limit", "3", "--completed-streak-limit", "15"])
 

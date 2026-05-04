@@ -116,6 +116,9 @@ def classify_failure(error: str | BaseException) -> str:
         for keyword in (
             "未找到可下载图片",
             "下载结果不是图片内容",
+            "下载结果为空文件",
+            "下载文件大小不匹配",
+            "content-length",
             "image/",
             "pximg",
             "download",

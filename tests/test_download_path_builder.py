@@ -95,6 +95,30 @@ class DownloadPathBuilderTestCase(unittest.TestCase):
 
         self.assertEqual(matched, saved_path)
 
+    def test_find_existing_file_for_page_ignores_partial_and_empty_files(self) -> None:
+        artwork = ArtworkInfo(
+            artwork_id="123456789",
+            user_id="998877",
+            author_name="mignon",
+            title="制服まとめ",
+            page_count=1,
+        )
+
+        with TemporaryDirectory() as temp_dir:
+            builder = DownloadPathBuilder(temp_dir)
+            author_dir = Path(temp_dir) / builder.build_author_folder_name(artwork)
+            author_dir.mkdir(parents=True, exist_ok=True)
+            (author_dir / "制服まとめ__123456789.jpg.part").write_bytes(b"partial")
+            (author_dir / "制服まとめ__123456789.png").write_bytes(b"")
+
+            matched = builder.find_existing_file_for_page(
+                artwork,
+                page_index=0,
+                total_pages=1,
+            )
+
+        self.assertIsNone(matched)
+
 
 if __name__ == "__main__":
     unittest.main()
