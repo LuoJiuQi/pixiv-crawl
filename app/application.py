@@ -391,6 +391,8 @@ class PixivApplication:
                     skipped_authors.append(user_id)
                     continue
 
+                assert self.crawler is not None
+                assert self.downloader is not None
                 summary = process_artwork_batch(
                     artwork_ids=artwork_ids,
                     crawler=self.crawler,

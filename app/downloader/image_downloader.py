@@ -146,7 +146,7 @@ class PixivImageDownloader:
         cookies: httpx.Cookies,
         proxy_url: str | None,
     ) -> httpx.Client:
-        client_kwargs: dict[str, object] = {
+        client_kwargs: dict[str, object] = {  # type: ignore[dict-item]
             "headers": headers,
             "cookies": cookies,
             "follow_redirects": True,
@@ -289,6 +289,8 @@ class PixivImageDownloader:
                     exc,
                 )
                 time.sleep(retry_delay)
+
+        raise RuntimeError("下载重试次数已耗尽")  # pragma: no cover
 
     def _build_download_plan(self, artwork: ArtworkInfo) -> list[tuple[int, str]]:
         return self.planner.build_download_plan(artwork)
