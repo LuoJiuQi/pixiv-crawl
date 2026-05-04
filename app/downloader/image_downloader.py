@@ -155,7 +155,7 @@ class PixivImageDownloader:
         if proxy_url:
             client_kwargs["proxy"] = proxy_url
 
-        return httpx.Client(**client_kwargs)
+        return httpx.Client(**client_kwargs)  # pyright: ignore[reportArgumentType]
 
     def _is_retryable_download_error(self, exc: Exception) -> bool:
         if isinstance(exc, httpx.HTTPStatusError):

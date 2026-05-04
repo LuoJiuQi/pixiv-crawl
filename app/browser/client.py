@@ -84,7 +84,7 @@ class BrowserClient:
         # 如果配置了代理，就在浏览器启动阶段一起接上。
         # 这样页面访问、登录流程、站内接口请求都会走同一条代理链路。
         if settings.proxy_server.strip():
-            proxy_config = {
+            proxy_config: dict[str, str] = {
                 "server": settings.proxy_server.strip(),
             }
             if settings.proxy_username.strip():
