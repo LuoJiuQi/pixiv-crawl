@@ -7,7 +7,8 @@
   "exclude": [
     "**/__pycache__",
     "data",
-    "logs"
+    "logs",
+    "**/.venv"
   ],
   "venvPath": ".",
   "venv": ".venv",
@@ -17,7 +18,8 @@
     {
       "root": ".",
       "extraPaths": [
-        "."
+        ".",
+        ".venv/Lib/site-packages"
       ]
     }
   ]
