@@ -3,6 +3,7 @@ from argparse import Namespace
 from unittest.mock import MagicMock, patch
 
 from app.application import PixivApplication
+from app.schemas.task import BatchRunSummary, FailedResult, IncrementalSelectionResult, ProcessResult
 
 
 class PixivApplicationTestCase(unittest.TestCase):
@@ -78,16 +79,16 @@ class PixivApplicationTestCase(unittest.TestCase):
         app.author_crawler = MagicMock()
         app.author_crawler.collect_author_artwork_ids.return_value = ["300", "200", "100"]
         app.record_repository = MagicMock()
-        selection = {
-            "candidate_artwork_ids": ["300", "200"],
-            "total_available_artwork_count": 3,
-            "scanned_artwork_count": 3,
-            "new_artwork_ids": ["300"],
-            "retry_artwork_ids": ["200"],
-            "skipped_completed_ids": ["100"],
-            "stopped_early": False,
-            "stop_after_completed_streak": 10,
-        }
+        selection = IncrementalSelectionResult(
+            candidate_artwork_ids=["300", "200"],
+            total_available_artwork_count=3,
+            scanned_artwork_count=3,
+            new_artwork_ids=["300"],
+            retry_artwork_ids=["200"],
+            skipped_completed_ids=["100"],
+            stopped_early=False,
+            stop_after_completed_streak=10,
+        )
 
         with patch("app.application.select_incremental_artwork_ids", return_value=selection) as mocked_select, \
                 patch("app.application.console_service.show_incremental_selection_summary") as mocked_show_selection, \
@@ -128,17 +129,20 @@ class PixivApplicationTestCase(unittest.TestCase):
         app.crawler = MagicMock()
         app.downloader = MagicMock()
         app.record_repository = MagicMock()
-        selection = {
-            "candidate_artwork_ids": ["100"],
-            "total_available_artwork_count": 1,
-            "scanned_artwork_count": 1,
-            "new_artwork_ids": ["100"],
-            "retry_artwork_ids": [],
-            "skipped_completed_ids": [],
-            "stopped_early": False,
-            "stop_after_completed_streak": 10,
-        }
-        summary = {"success_results": [{"artwork_id": "100"}], "failed_results": []}
+        selection = IncrementalSelectionResult(
+            candidate_artwork_ids=["100"],
+            total_available_artwork_count=1,
+            scanned_artwork_count=1,
+            new_artwork_ids=["100"],
+            retry_artwork_ids=[],
+            skipped_completed_ids=[],
+            stopped_early=False,
+            stop_after_completed_streak=10,
+        )
+        summary = BatchRunSummary(
+            success_results=[ProcessResult(artwork_id="100")],
+            failed_results=[],
+        )
 
         with patch("app.application.select_incremental_artwork_ids", return_value=selection), \
                 patch("app.application.process_artwork_batch", return_value=summary) as mocked_process_batch, \
@@ -160,7 +164,7 @@ class PixivApplicationTestCase(unittest.TestCase):
             updated_authors=["1"],
             skipped_authors=["2"],
             failed_authors=[("3", "profile failed")],
-            total_success_results=[{"artwork_id": "100"}],
+            total_success_results=[ProcessResult(artwork_id="100")],
             total_failed_results=[],
         )
         mocked_pause.assert_not_called()

@@ -70,35 +70,35 @@ def process_artwork(
     if already_downloaded:
         logger.debug("作品 %s 已完整下载，跳过重复下载。", artwork_id)
         log_downloaded_files(logger, existing_files, "已有图片文件")
-        return {
-            "artwork_id": artwork_id,
-            "title": info.title,
-            "author_name": info.author_name,
-            "page_count": info.page_count,
-            "download_count": len(existing_files),
-            "saved_html": saved_file,
-            "saved_json": saved_json,
-            "downloaded_files": existing_files,
-            "skipped_download": True,
-            "skipped_by_db": False,
-        }
+        return ProcessResult(
+            artwork_id=artwork_id,
+            title=info.title,
+            author_name=info.author_name,
+            page_count=info.page_count,
+            download_count=len(existing_files),
+            saved_html=saved_file,
+            saved_json=saved_json,
+            downloaded_files=existing_files,
+            skipped_download=True,
+            skipped_by_db=False,
+        )
 
     downloaded_files = downloader.download_prepared_artwork(prepared_download)
     logger.debug("作品 %s 下载完成，图片数量：%s", artwork_id, len(downloaded_files))
     log_downloaded_files(logger, downloaded_files, "已下载图片")
 
-    return {
-        "artwork_id": artwork_id,
-        "title": info.title,
-        "author_name": info.author_name,
-        "page_count": info.page_count,
-        "download_count": len(downloaded_files),
-        "saved_html": saved_file,
-        "saved_json": saved_json,
-        "downloaded_files": downloaded_files,
-        "skipped_download": False,
-        "skipped_by_db": False,
-    }
+    return ProcessResult(
+        artwork_id=artwork_id,
+        title=info.title,
+        author_name=info.author_name,
+        page_count=info.page_count,
+        download_count=len(downloaded_files),
+        saved_html=saved_file,
+        saved_json=saved_json,
+        downloaded_files=downloaded_files,
+        skipped_download=False,
+        skipped_by_db=False,
+    )
 
 
 def select_incremental_artwork_ids(
@@ -161,16 +161,16 @@ def select_incremental_artwork_ids(
             stopped_early = True
             break
 
-    return {
-        "candidate_artwork_ids": candidate_artwork_ids,
-        "new_artwork_ids": new_artwork_ids,
-        "retry_artwork_ids": retry_artwork_ids,
-        "skipped_completed_ids": skipped_completed_ids,
-        "scanned_artwork_count": scanned_artwork_count,
-        "total_available_artwork_count": len(artwork_ids),
-        "stopped_early": stopped_early,
-        "stop_after_completed_streak": completed_streak_limit,
-    }
+    return IncrementalSelectionResult(
+        candidate_artwork_ids=candidate_artwork_ids,
+        new_artwork_ids=new_artwork_ids,
+        retry_artwork_ids=retry_artwork_ids,
+        skipped_completed_ids=skipped_completed_ids,
+        scanned_artwork_count=scanned_artwork_count,
+        total_available_artwork_count=len(artwork_ids),
+        stopped_early=stopped_early,
+        stop_after_completed_streak=completed_streak_limit,
+    )
 
 
 def _build_completed_result_from_record(
@@ -184,18 +184,18 @@ def _build_completed_result_from_record(
     - 一套给“刚刚下载成功”的作品
     - 一套给“数据库里本来就完成了”的作品
     """
-    return {
-        "artwork_id": artwork_id,
-        "title": str(existing_record["title"]),
-        "author_name": str(existing_record["author_name"]),
-        "page_count": int(existing_record["page_count"]),
-        "download_count": int(existing_record["download_count"]),
-        "saved_html": str(existing_record["saved_html"]),
-        "saved_json": str(existing_record["saved_json"]),
-        "downloaded_files": list(existing_record["downloaded_files"]),
-        "skipped_download": True,
-        "skipped_by_db": True,
-    }
+    return ProcessResult(
+        artwork_id=artwork_id,
+        title=str(existing_record["title"]),
+        author_name=str(existing_record["author_name"]),
+        page_count=int(existing_record["page_count"]),
+        download_count=int(existing_record["download_count"]),
+        saved_html=str(existing_record["saved_html"]),
+        saved_json=str(existing_record["saved_json"]),
+        downloaded_files=list(existing_record["downloaded_files"]),
+        skipped_download=True,
+        skipped_by_db=True,
+    )
 
 
 def _completed_record_files_exist(existing_record: DownloadRecord) -> bool:
@@ -259,23 +259,23 @@ def process_artwork_batch(
                 artwork_id,
                 status="completed",
                 error_type="",
-                title=result["title"],
-                author_name=result["author_name"],
-                page_count=result["page_count"],
-                download_count=result["download_count"],
-                saved_html=result["saved_html"],
-                saved_json=result["saved_json"],
-                downloaded_files=result["downloaded_files"],
+                title=result.title,
+                author_name=result.author_name,
+                page_count=result.page_count,
+                download_count=result.download_count,
+                saved_html=result.saved_html,
+                saved_json=result.saved_json,
+                downloaded_files=result.downloaded_files,
                 error_message="",
             )
             logger.debug("作品 %s 处理完成。", artwork_id)
         except Exception as exc:
             error_message = str(exc)
             error_type = classify_failure(exc)
-            failed_result: FailedResult = {
-                "artwork_id": artwork_id,
-                "error": error_message,
-            }
+            failed_result = FailedResult(
+                artwork_id=artwork_id,
+                error=error_message,
+            )
             failed_results.append(failed_result)
 
             record_repository.mark_failed(
@@ -286,7 +286,7 @@ def process_artwork_batch(
             logger.warning("作品 %s 处理失败：%s", artwork_id, error_message)
             logger.warning("失败类型：%s", error_type)
 
-    return {
-        "success_results": success_results,
-        "failed_results": failed_results,
-    }
+    return BatchRunSummary(
+        success_results=success_results,
+        failed_results=failed_results,
+    )

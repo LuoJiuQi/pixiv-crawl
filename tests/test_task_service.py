@@ -7,6 +7,7 @@ from unittest.mock import patch
 import httpx
 
 from app.db.download_record_repository import DownloadRecord, DownloadRecordRepository
+from app.schemas.task import BatchRunSummary, FailedResult, IncrementalSelectionResult, ProcessResult
 from app.services import task_service
 from app.services.task_service import process_artwork, process_artwork_batch, select_incremental_artwork_ids
 
@@ -71,13 +72,13 @@ class TaskServiceTestCase(unittest.TestCase):
                 completed_streak_limit=10,
             )
 
-        self.assertEqual(selection["candidate_artwork_ids"], ["100", "300", "400"])
-        self.assertEqual(selection["new_artwork_ids"], ["100", "400"])
-        self.assertEqual(selection["retry_artwork_ids"], ["300"])
-        self.assertEqual(selection["skipped_completed_ids"], ["200"])
-        self.assertEqual(selection["scanned_artwork_count"], 4)
-        self.assertEqual(selection["total_available_artwork_count"], 4)
-        self.assertFalse(selection["stopped_early"])
+        self.assertEqual(selection.candidate_artwork_ids, ["100", "300", "400"])
+        self.assertEqual(selection.new_artwork_ids, ["100", "400"])
+        self.assertEqual(selection.retry_artwork_ids, ["300"])
+        self.assertEqual(selection.skipped_completed_ids, ["200"])
+        self.assertEqual(selection.scanned_artwork_count, 4)
+        self.assertEqual(selection.total_available_artwork_count, 4)
+        self.assertFalse(selection.stopped_early)
 
     def test_select_incremental_artwork_ids_stops_after_completed_streak(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -118,14 +119,14 @@ class TaskServiceTestCase(unittest.TestCase):
                 completed_streak_limit=3,
             )
 
-        self.assertEqual(selection["candidate_artwork_ids"], [])
-        self.assertEqual(selection["new_artwork_ids"], [])
-        self.assertEqual(selection["retry_artwork_ids"], [])
-        self.assertEqual(selection["skipped_completed_ids"], ["500", "400", "300"])
-        self.assertEqual(selection["scanned_artwork_count"], 3)
-        self.assertEqual(selection["total_available_artwork_count"], 5)
-        self.assertTrue(selection["stopped_early"])
-        self.assertEqual(selection["stop_after_completed_streak"], 3)
+        self.assertEqual(selection.candidate_artwork_ids, [])
+        self.assertEqual(selection.new_artwork_ids, [])
+        self.assertEqual(selection.retry_artwork_ids, [])
+        self.assertEqual(selection.skipped_completed_ids, ["500", "400", "300"])
+        self.assertEqual(selection.scanned_artwork_count, 3)
+        self.assertEqual(selection.total_available_artwork_count, 5)
+        self.assertTrue(selection.stopped_early)
+        self.assertEqual(selection.stop_after_completed_streak, 3)
 
     def test_select_incremental_artwork_ids_retries_completed_artwork_when_files_are_missing(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -145,11 +146,11 @@ class TaskServiceTestCase(unittest.TestCase):
                 completed_streak_limit=10,
             )
 
-        self.assertEqual(selection["candidate_artwork_ids"], ["200", "100"])
-        self.assertEqual(selection["new_artwork_ids"], ["100"])
-        self.assertEqual(selection["retry_artwork_ids"], ["200"])
-        self.assertEqual(selection["skipped_completed_ids"], [])
-        self.assertFalse(selection["stopped_early"])
+        self.assertEqual(selection.candidate_artwork_ids, ["200", "100"])
+        self.assertEqual(selection.new_artwork_ids, ["100"])
+        self.assertEqual(selection.retry_artwork_ids, ["200"])
+        self.assertEqual(selection.skipped_completed_ids, [])
+        self.assertFalse(selection.stopped_early)
 
     def test_process_artwork_batch_reprocesses_completed_record_when_files_are_missing(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -168,18 +169,18 @@ class TaskServiceTestCase(unittest.TestCase):
                 downloaded_files=[str(Path(temp_dir) / "missing.jpg")],
             )
 
-            expected_result = {
-                "artwork_id": "100",
-                "title": "new",
-                "author_name": "author",
-                "page_count": 1,
-                "download_count": 1,
-                "saved_html": "./data/temp/html/artwork_100.html",
-                "saved_json": "./data/temp/json/artwork_100.json",
-                "downloaded_files": [str(Path(temp_dir) / "redownloaded.jpg")],
-                "skipped_download": False,
-                "skipped_by_db": False,
-            }
+            expected_result = ProcessResult(
+                artwork_id="100",
+                title="new",
+                author_name="author",
+                page_count=1,
+                download_count=1,
+                saved_html="./data/temp/html/artwork_100.html",
+                saved_json="./data/temp/json/artwork_100.json",
+                downloaded_files=[str(Path(temp_dir) / "redownloaded.jpg")],
+                skipped_download=False,
+                skipped_by_db=False,
+            )
 
             with patch("app.services.task_service.process_artwork", return_value=expected_result) as mocked:
                 with patch.object(task_service, "logger"):
@@ -192,9 +193,9 @@ class TaskServiceTestCase(unittest.TestCase):
 
             record = repository.get_record("100")
 
-        self.assertEqual(len(summary["success_results"]), 1)
-        self.assertEqual(summary["success_results"][0]["title"], "new")
-        self.assertEqual(summary["failed_results"], [])
+        self.assertEqual(len(summary.success_results), 1)
+        self.assertEqual(summary.success_results[0].title, "new")
+        self.assertEqual(summary.failed_results, [])
         mocked.assert_called_once()
         self.assertIsNotNone(record)
         record = cast(DownloadRecord, record)
@@ -220,18 +221,18 @@ class TaskServiceTestCase(unittest.TestCase):
                 downloaded_files=[str(empty_file)],
             )
 
-            expected_result = {
-                "artwork_id": "100",
-                "title": "new",
-                "author_name": "author",
-                "page_count": 1,
-                "download_count": 1,
-                "saved_html": "./data/temp/html/artwork_100.html",
-                "saved_json": "./data/temp/json/artwork_100.json",
-                "downloaded_files": [str(Path(temp_dir) / "redownloaded.jpg")],
-                "skipped_download": False,
-                "skipped_by_db": False,
-            }
+            expected_result = ProcessResult(
+                artwork_id="100",
+                title="new",
+                author_name="author",
+                page_count=1,
+                download_count=1,
+                saved_html="./data/temp/html/artwork_100.html",
+                saved_json="./data/temp/json/artwork_100.json",
+                downloaded_files=[str(Path(temp_dir) / "redownloaded.jpg")],
+                skipped_download=False,
+                skipped_by_db=False,
+            )
 
             with patch("app.services.task_service.process_artwork", return_value=expected_result) as mocked:
                 with patch.object(task_service, "logger"):
@@ -242,9 +243,9 @@ class TaskServiceTestCase(unittest.TestCase):
                         record_repository=repository,
                     )
 
-        self.assertEqual(len(summary["success_results"]), 1)
-        self.assertEqual(summary["success_results"][0]["title"], "new")
-        self.assertEqual(summary["failed_results"], [])
+        self.assertEqual(len(summary.success_results), 1)
+        self.assertEqual(summary.success_results[0].title, "new")
+        self.assertEqual(summary.failed_results, [])
         mocked.assert_called_once()
 
     def test_process_artwork_batch_reuses_completed_record_when_files_exist(self) -> None:
@@ -275,23 +276,19 @@ class TaskServiceTestCase(unittest.TestCase):
                 )
 
         mocked.assert_not_called()
-        self.assertEqual(summary["failed_results"], [])
-        self.assertEqual(len(summary["success_results"]), 1)
-        self.assertEqual(
-            summary["success_results"][0],
-            {
-                "artwork_id": "100",
-                "title": "old",
-                "author_name": "author",
-                "page_count": 2,
-                "download_count": 1,
-                "saved_html": "./data/temp/html/artwork_100.html",
-                "saved_json": "./data/temp/json/artwork_100.json",
-                "downloaded_files": [str(completed_file)],
-                "skipped_download": True,
-                "skipped_by_db": True,
-            },
-        )
+        self.assertEqual(summary.failed_results, [])
+        self.assertEqual(len(summary.success_results), 1)
+        result = summary.success_results[0]
+        self.assertEqual(result.artwork_id, "100")
+        self.assertEqual(result.title, "old")
+        self.assertEqual(result.author_name, "author")
+        self.assertEqual(result.page_count, 2)
+        self.assertEqual(result.download_count, 1)
+        self.assertEqual(result.saved_html, "./data/temp/html/artwork_100.html")
+        self.assertEqual(result.saved_json, "./data/temp/json/artwork_100.json")
+        self.assertEqual(result.downloaded_files, [str(completed_file)])
+        self.assertTrue(result.skipped_download)
+        self.assertTrue(result.skipped_by_db)
 
     def test_process_artwork_batch_marks_http_429_as_rate_limit(self) -> None:
         request = httpx.Request("GET", "https://i.pximg.net/image.jpg")
@@ -319,7 +316,7 @@ class TaskServiceTestCase(unittest.TestCase):
 
             record = repository.get_record("100")
 
-        self.assertEqual(len(summary["failed_results"]), 1)
+        self.assertEqual(len(summary.failed_results), 1)
         self.assertIsNotNone(record)
         record = cast(DownloadRecord, record)
         self.assertEqual(record["status"], "failed")
@@ -376,7 +373,7 @@ class TaskServiceTestCase(unittest.TestCase):
                 error_type="timeout",
             )
 
-        self.assertEqual(len(summary["failed_results"]), 3)
+        self.assertEqual(len(summary.failed_results), 3)
         self.assertEqual([record["artwork_id"] for record in rate_limit_records], ["100"])
         self.assertEqual([record["artwork_id"] for record in http_5xx_records], ["200"])
         self.assertEqual([record["artwork_id"] for record in timeout_records], ["300"])
@@ -416,9 +413,9 @@ class TaskServiceTestCase(unittest.TestCase):
                 downloader=DummyDownloader(),
             )
 
-        self.assertEqual(result["saved_html"], "")
-        self.assertEqual(result["saved_json"], "")
-        self.assertEqual(result["downloaded_files"], ["downloaded.jpg"])
+        self.assertEqual(result.saved_html, "")
+        self.assertEqual(result.saved_json, "")
+        self.assertEqual(result.downloaded_files, ["downloaded.jpg"])
 
     def test_process_artwork_prepares_download_targets_only_once(self) -> None:
         fake_info = type(
@@ -472,7 +469,7 @@ class TaskServiceTestCase(unittest.TestCase):
 
         self.assertEqual(downloader.prepare_calls, 1)
         self.assertEqual(downloader.received_prepared["artwork"], fake_info)
-        self.assertEqual(result["downloaded_files"], ["downloaded.jpg"])
+        self.assertEqual(result.downloaded_files, ["downloaded.jpg"])
 
     def test_process_artwork_emits_debug_logs_for_page_state(self) -> None:
         fake_info = type(

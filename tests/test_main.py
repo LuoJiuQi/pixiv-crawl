@@ -1,6 +1,7 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
+from app.schemas.task import BatchRunSummary, FailedResult, IncrementalSelectionResult, ProcessResult
 import main
 from app import application as app_module
 
@@ -78,7 +79,7 @@ class MainInputParsingTestCase(unittest.TestCase):
         mock_repository = MagicMock()
         mock_login_service = MagicMock()
         mock_login_service.is_logged_in.return_value = True
-        summary = {"success_results": [], "failed_results": []}
+        summary = BatchRunSummary(success_results=[], failed_results=[])
 
         with patch("app.application.BrowserClient", return_value=mock_client), patch(
             "app.application.DownloadRecordRepository",
@@ -133,16 +134,12 @@ class MainInputParsingTestCase(unittest.TestCase):
         mock_repository = MagicMock()
         mock_login_service = MagicMock()
         mock_login_service.is_logged_in.return_value = True
-        summary = {
-            "success_results": [
-                {
-                    "artwork_id": "100",
-                    "skipped_download": False,
-                    "skipped_by_db": False,
-                }
+        summary = BatchRunSummary(
+            success_results=[
+                ProcessResult(artwork_id="100", skipped_download=False, skipped_by_db=False),
             ],
-            "failed_results": [{"artwork_id": "200", "error": "timeout"}],
-        }
+            failed_results=[FailedResult(artwork_id="200", error="timeout")],
+        )
 
         with patch("app.application.BrowserClient", return_value=mock_client), patch(
             "app.application.DownloadRecordRepository",
@@ -171,7 +168,7 @@ class MainInputParsingTestCase(unittest.TestCase):
         mock_repository = MagicMock()
         mock_login_service = MagicMock()
         mock_login_service.is_logged_in.return_value = True
-        summary = {"success_results": [], "failed_results": []}
+        summary = BatchRunSummary(success_results=[], failed_results=[])
 
         with patch("app.application.BrowserClient", return_value=mock_client), patch(
             "app.application.DownloadRecordRepository",
@@ -208,7 +205,7 @@ class MainInputParsingTestCase(unittest.TestCase):
         mock_repository = MagicMock()
         mock_login_service = MagicMock()
         mock_login_service.is_logged_in.return_value = True
-        summary = {"success_results": [], "failed_results": []}
+        summary = BatchRunSummary(success_results=[], failed_results=[])
 
         with patch("app.application.BrowserClient", return_value=mock_client), patch(
             "app.application.DownloadRecordRepository",
@@ -582,7 +579,7 @@ class MainInputParsingTestCase(unittest.TestCase):
         mock_repository = MagicMock()
         mock_login_service = MagicMock()
         mock_login_service.is_logged_in.return_value = True
-        summary = {"success_results": [], "failed_results": []}
+        summary = BatchRunSummary(success_results=[], failed_results=[])
 
         with patch("app.application.BrowserClient", return_value=mock_client), patch(
             "app.application.DownloadRecordRepository",
@@ -625,17 +622,17 @@ class MainInputParsingTestCase(unittest.TestCase):
         mock_author_crawler = MagicMock()
         mock_author_crawler.collect_following_user_ids.return_value = ["123"]
         mock_author_crawler.collect_author_artwork_ids.return_value = ["100"]
-        summary = {"success_results": [], "failed_results": []}
-        selection = {
-            "total_available_artwork_count": 1,
-            "scanned_artwork_count": 1,
-            "new_artwork_ids": ["100"],
-            "retry_artwork_ids": [],
-            "skipped_completed_ids": [],
-            "candidate_artwork_ids": ["100"],
-            "stopped_early": False,
-            "stop_after_completed_streak": 15,
-        }
+        summary = BatchRunSummary(success_results=[], failed_results=[])
+        selection = IncrementalSelectionResult(
+            total_available_artwork_count=1,
+            scanned_artwork_count=1,
+            new_artwork_ids=["100"],
+            retry_artwork_ids=[],
+            skipped_completed_ids=[],
+            candidate_artwork_ids=["100"],
+            stopped_early=False,
+            stop_after_completed_streak=15,
+        )
 
         with patch("app.application.BrowserClient", return_value=mock_client), patch(
             "app.application.DownloadRecordRepository",

@@ -326,7 +326,7 @@ class PixivApplication:
                 self.record_repository,
                 completed_streak_limit=author_request["completed_streak_limit"],
             )
-            artwork_ids = selection["candidate_artwork_ids"]
+            artwork_ids = selection.candidate_artwork_ids
             console_service.show_incremental_selection_summary(selection)
 
             if not artwork_ids:
@@ -383,7 +383,7 @@ class PixivApplication:
                 )
                 console_service.show_incremental_selection_summary(selection)
 
-                artwork_ids = selection["candidate_artwork_ids"]
+                artwork_ids = selection.candidate_artwork_ids
                 if not artwork_ids:
                     logger.debug("作者 %s 当前没有需要增量处理的新作品。", user_id)
                     skipped_authors.append(user_id)
@@ -397,8 +397,8 @@ class PixivApplication:
                 )
                 console_service.show_batch_summary(summary)
 
-                total_success_results.extend(summary["success_results"])
-                total_failed_results.extend(summary["failed_results"])
+                total_success_results.extend(summary.success_results)
+                total_failed_results.extend(summary.failed_results)
                 updated_authors.append(user_id)
             except Exception as exc:
                 error_message = str(exc)
