@@ -13,9 +13,10 @@ from __future__ import annotations
 import subprocess
 import sys
 import time
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Protocol
+from typing import Callable, Protocol
 
 from app.core.config import settings
 from app.core.logging_config import get_logger
@@ -29,9 +30,26 @@ class CommandRunner(Protocol):
     def __call__(self, command: list[str], *, cwd: str) -> subprocess.CompletedProcess[str]: ...
 
 
+@dataclass(frozen=True)
+class ScheduledRunOptions:
+    run_time: str
+    retry_failed_enabled: bool
+    retry_failed_limit: int
+    report_output_dir: str
+
+
 def parse_scheduled_run_time(time_text: str) -> tuple[int, int]:
     hour_text, _, minute_text = time_text.partition(":")
     return int(hour_text), int(minute_text)
+
+
+def build_scheduled_run_options() -> ScheduledRunOptions:
+    return ScheduledRunOptions(
+        run_time=settings.scheduled_run_time,
+        retry_failed_enabled=settings.scheduled_retry_failed_enabled,
+        retry_failed_limit=settings.scheduled_retry_failed_limit,
+        report_output_dir=settings.scheduled_report_output_dir,
+    )
 
 
 def compute_next_scheduled_run(now: datetime, time_text: str) -> datetime:
@@ -115,21 +133,25 @@ def write_scheduled_run_report(
 def run_scheduled_crawl_loop(
     *,
     stop_after_runs: int | None = None,
-    now_fn: callable = datetime.now,
-    sleep_fn: callable = time.sleep,
+    options: ScheduledRunOptions | None = None,
+    now_fn: Callable[[], datetime] = datetime.now,
+    sleep_fn: Callable[[float], None] = time.sleep,
+    sleep_until_fn: Callable[..., None] = sleep_until,
     command_runner: CommandRunner = lambda command, *, cwd: subprocess.run(command, cwd=cwd, check=False),
     python_executable: str | None = None,
+    report_writer: Callable[..., str] = write_scheduled_run_report,
 ) -> int:
+    resolved_options = options or build_scheduled_run_options()
     run_count = 0
 
     while stop_after_runs is None or run_count < stop_after_runs:
         now = now_fn()
-        next_run = compute_next_scheduled_run(now, settings.scheduled_run_time)
+        next_run = compute_next_scheduled_run(now, resolved_options.run_time)
         logger.info(
             "已开启定时抓取，下次将在 %s 执行关注列表更新。",
             next_run.strftime("%Y-%m-%d %H:%M"),
         )
-        sleep_until(next_run, now_fn=now_fn, sleep_fn=sleep_fn)
+        sleep_until_fn(next_run, now_fn=now_fn, sleep_fn=sleep_fn)
         run_started_at = now_fn()
 
         doctor_command = build_scheduled_doctor_command(python_executable=python_executable)
@@ -138,7 +160,7 @@ def run_scheduled_crawl_loop(
         logger.info("本次定时自检已结束，退出码：%s", doctor_result.returncode)
 
         report: dict[str, object] = {
-            "scheduled_time": settings.scheduled_run_time,
+            "scheduled_time": resolved_options.run_time,
             "scheduled_for": next_run.isoformat(timespec="seconds"),
             "started_at": run_started_at.isoformat(timespec="seconds"),
             "doctor": _build_command_report(
@@ -151,7 +173,10 @@ def run_scheduled_crawl_loop(
                 reason="waiting_for_doctor",
             ),
             "retry_failed": _build_command_report(
-                build_scheduled_retry_command(python_executable=python_executable),
+                build_scheduled_retry_command(
+                    python_executable=python_executable,
+                    limit=resolved_options.retry_failed_limit,
+                ),
                 skipped=True,
                 reason="disabled",
             ),
@@ -160,7 +185,11 @@ def run_scheduled_crawl_loop(
         if doctor_result.returncode != 0:
             logger.warning("定时自检未通过，已跳过本轮关注列表更新。")
             report["status"] = "skipped_by_doctor"
-            report_path = write_scheduled_run_report(report, run_started_at=run_started_at)
+            report_path = report_writer(
+                report,
+                run_started_at=run_started_at,
+                output_dir=resolved_options.report_output_dir,
+            )
             logger.info("本轮定时报告已写入：%s", report_path)
             run_count += 1
             continue
@@ -171,8 +200,8 @@ def run_scheduled_crawl_loop(
         logger.info("本次定时抓取已结束，退出码：%s", result.returncode)
         report["crawl_following"] = _build_command_report(command, returncode=result.returncode, skipped=False)
 
-        if result.returncode == 0 and settings.scheduled_retry_failed_enabled:
-            retry_limit = settings.scheduled_retry_failed_limit
+        if result.returncode == 0 and resolved_options.retry_failed_enabled:
+            retry_limit = resolved_options.retry_failed_limit
             if retry_limit > 0:
                 retry_command = build_scheduled_retry_command(
                     python_executable=python_executable,
@@ -197,10 +226,13 @@ def run_scheduled_crawl_loop(
                     reason="limit_is_zero",
                 )
                 report["status"] = "completed"
-        elif result.returncode != 0 and settings.scheduled_retry_failed_enabled:
+        elif result.returncode != 0 and resolved_options.retry_failed_enabled:
             logger.warning("定时抓取未成功结束，已跳过本轮失败补偿。")
             report["retry_failed"] = _build_command_report(
-                build_scheduled_retry_command(python_executable=python_executable),
+                build_scheduled_retry_command(
+                    python_executable=python_executable,
+                    limit=resolved_options.retry_failed_limit,
+                ),
                 skipped=True,
                 reason="crawl_failed",
             )
@@ -209,18 +241,28 @@ def run_scheduled_crawl_loop(
             report["status"] = "completed" if result.returncode == 0 else "crawl_failed"
             if result.returncode == 0:
                 report["retry_failed"] = _build_command_report(
-                    build_scheduled_retry_command(python_executable=python_executable),
+                    build_scheduled_retry_command(
+                        python_executable=python_executable,
+                        limit=resolved_options.retry_failed_limit,
+                    ),
                     skipped=True,
                     reason="disabled",
                 )
             else:
                 report["retry_failed"] = _build_command_report(
-                    build_scheduled_retry_command(python_executable=python_executable),
+                    build_scheduled_retry_command(
+                        python_executable=python_executable,
+                        limit=resolved_options.retry_failed_limit,
+                    ),
                     skipped=True,
                     reason="crawl_failed",
                 )
 
-        report_path = write_scheduled_run_report(report, run_started_at=run_started_at)
+        report_path = report_writer(
+            report,
+            run_started_at=run_started_at,
+            output_dir=resolved_options.report_output_dir,
+        )
         logger.info("本轮定时报告已写入：%s", report_path)
         run_count += 1
 

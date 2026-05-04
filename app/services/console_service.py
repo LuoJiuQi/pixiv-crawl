@@ -14,7 +14,7 @@ from io import TextIOBase
 from typing import TYPE_CHECKING
 from collections.abc import Iterable, Mapping, Sequence
 
-from app.services.task_service import BatchRunSummary, IncrementalSelectionResult
+from app.schemas.task import BatchRunSummary, IncrementalSelectionResult
 
 if TYPE_CHECKING:
     from app.services.doctor_service import DoctorReport

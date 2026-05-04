@@ -12,9 +12,7 @@
 这样每个文件的职责都会更单纯，也更容易读懂。
 """
 
-import json
 from pathlib import Path
-from typing import Any, TypedDict
 
 from app.core.config import settings
 from app.core.logging_config import get_logger
@@ -22,187 +20,11 @@ from app.crawler.artwork_crawler import ArtworkCrawler
 from app.db.download_record_repository import DownloadRecord, DownloadRecordRepository
 from app.downloader.image_downloader import PixivImageDownloader
 from app.parser.artwork_parser import ArtworkParser
+from app.schemas.task import BatchRunSummary, FailedResult, IncrementalSelectionResult, ProcessResult
 from app.services.failure_classifier import classify_failure
+from app.services.task_debug import log_downloaded_files, log_parsed_info
 
 logger = get_logger(__name__)
-
-
-class ProcessResult(TypedDict):
-    """
-    描述“单个作品处理结果”应该长什么样。
-
-    你可以把它理解成一张固定格式的“结果清单”。
-    只要一个作品处理完成，不管是正常下载，还是被跳过，
-    最后都整理成这个格式再往外传。
-    """
-
-    artwork_id: str
-    title: str
-    author_name: str
-    page_count: int
-    download_count: int
-    saved_html: str
-    saved_json: str
-    downloaded_files: list[str]
-    skipped_download: bool
-    skipped_by_db: bool
-
-
-class FailedResult(TypedDict):
-    """
-    描述“单个失败结果”的最小信息。
-    """
-
-    artwork_id: str
-    error: str
-
-
-class BatchRunSummary(TypedDict):
-    """
-    描述“一整批任务跑完后的汇总结果”。
-    """
-
-    success_results: list[ProcessResult]
-    failed_results: list[FailedResult]
-
-
-class IncrementalSelectionResult(TypedDict):
-    """
-    描述“按作者增量更新时，筛选出来的任务集合”。
-
-    这里除了最终要处理的作品 ID，
-    还额外保留一些统计信息，方便在终端里解释：
-    - 为什么这次只处理这些作品
-    - 为什么提前停止继续往后扫描
-    """
-
-    candidate_artwork_ids: list[str]
-    new_artwork_ids: list[str]
-    retry_artwork_ids: list[str]
-    skipped_completed_ids: list[str]
-    scanned_artwork_count: int
-    total_available_artwork_count: int
-    stopped_early: bool
-    stop_after_completed_streak: int
-
-
-def _truncate_text(text: str, max_length: int = 120) -> str:
-    """
-    把过长的文本裁短一点，避免一行直接刷满整个终端。
-    """
-    if len(text) <= max_length:
-        return text
-    return text[: max_length - 3] + "..."
-
-
-def _summarize_debug_value(value: Any) -> str:
-    """
-    把复杂对象转换成“人眼更容易扫一眼看懂”的摘要文本。
-
-    目标不是完整展示所有内容，
-    而是先让你快速判断：
-    - 这是字典、列表，还是普通字符串
-    - 里面大概有多少项
-    - 关键内容是不是已经命中
-    """
-    if isinstance(value, dict):
-        keys = list(value.keys())
-        preview = ", ".join(str(key) for key in keys[:5])
-        if len(keys) > 5:
-            preview += ", ..."
-        return f"dict，共 {len(value)} 个键：{preview}"
-
-    if isinstance(value, list):
-        if not value:
-            return "list，空列表"
-
-        preview_items = ", ".join(_truncate_text(repr(item), 24) for item in value[:3])
-        if len(value) > 3:
-            preview_items += ", ..."
-        return f"list，共 {len(value)} 项：{preview_items}"
-
-    if isinstance(value, tuple):
-        return f"tuple：{_truncate_text(repr(value), 80)}"
-
-    if isinstance(value, str):
-        return _truncate_text(value, 120)
-
-    return _truncate_text(repr(value), 120)
-
-
-def _print_image_url_debug(urls: list[str]) -> None:
-    """
-    更清楚地打印候选图片地址。
-
-    以前是一整行长列表，读起来很费眼。
-    现在改成：
-    - 先显示总数量
-    - 再逐条编号
-    """
-    logger.debug("候选图片 URL，共 %s 条：", len(urls))
-    if not urls:
-        logger.debug("  (空)")
-        return
-
-    for index, url in enumerate(urls, start=1):
-        logger.debug("  [%s] %s", index, url)
-
-
-def _print_downloaded_files_debug(files: list[str], title: str) -> None:
-    """
-    按逐行编号的方式打印图片文件路径。
-
-    这里不做截断，保持终端里能看到完整文件列表。
-    """
-    logger.debug("%s，共 %s 张：", title, len(files))
-    if not files:
-        logger.debug("  (空)")
-        return
-
-    for index, file_path in enumerate(files, start=1):
-        logger.debug("  [%s] %s", index, file_path)
-
-
-def _print_next_data_hits_debug(hits: list[tuple[str, Any]]) -> None:
-    """
-    更清楚地打印 `next_data_hits`。
-
-    这里不再把整个复杂对象原样一股脑塞进一行，
-    而是改成“路径 + 摘要”的形式。
-    真正完整内容仍然会保存在 JSON 里，调试时可以去文件里慢慢看。
-    """
-    logger.debug("结构化命中（next_data_hits），共 %s 条：", len(hits))
-    if not hits:
-        logger.debug("  (空)")
-        return
-
-    for index, (path, value) in enumerate(hits, start=1):
-        logger.debug("  [%s] %s", index, path)
-        logger.debug("      %s", _summarize_debug_value(value))
-
-
-def _print_parsed_info_debug(info: Any) -> None:
-    """
-    把解析结果按更容易阅读的格式打印出来。
-
-    这里刻意做成“普通字段一行一个，复杂字段分块展示”，
-    这样你在终端里往回翻的时候，会轻松很多。
-    """
-    logger.debug("解析结果：")
-    logger.debug("标题：%s", info.title)
-    logger.debug("分享标题（og:title）：%s", info.og_title)
-    logger.debug("分享图片（og:image）：%s", info.og_image)
-    logger.debug("页面简介（description）：%s", _truncate_text(info.description, 160))
-    logger.debug("标准地址（canonical）：%s", info.canonical_url)
-    logger.debug("作品 ID：%s", info.artwork_id)
-    logger.debug("作者 ID：%s", info.user_id)
-    logger.debug("作者名：%s", info.author_name)
-    logger.debug("标签：%s", json.dumps(info.tags, ensure_ascii=False))
-    logger.debug("页数：%s", info.page_count)
-    logger.debug("是否包含 __NEXT_DATA__：%s", info.has_next_data)
-
-    _print_image_url_debug(info.possible_image_urls[:10])
-    _print_next_data_hits_debug(info.next_data_hits)
 
 
 def process_artwork(
@@ -231,7 +53,7 @@ def process_artwork(
     info = parser.extract_full_info()
 
     if settings.verbose_debug_output:
-        _print_parsed_info_debug(info)
+        log_parsed_info(logger, info)
 
     saved_file = ""
     saved_json = ""
@@ -246,7 +68,7 @@ def process_artwork(
     already_downloaded, existing_files = downloader.is_prepared_artwork_downloaded(prepared_download)
     if already_downloaded:
         logger.debug("作品 %s 已完整下载，跳过重复下载。", artwork_id)
-        _print_downloaded_files_debug(existing_files, "已有图片文件")
+        log_downloaded_files(logger, existing_files, "已有图片文件")
         return {
             "artwork_id": artwork_id,
             "title": info.title,
@@ -262,7 +84,7 @@ def process_artwork(
 
     downloaded_files = downloader.download_prepared_artwork(prepared_download)
     logger.debug("作品 %s 下载完成，图片数量：%s", artwork_id, len(downloaded_files))
-    _print_downloaded_files_debug(downloaded_files, "已下载图片")
+    log_downloaded_files(logger, downloaded_files, "已下载图片")
 
     return {
         "artwork_id": artwork_id,

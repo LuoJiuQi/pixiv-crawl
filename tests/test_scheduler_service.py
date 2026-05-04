@@ -8,6 +8,21 @@ from app.services import scheduler_service
 
 
 class SchedulerServiceTestCase(unittest.TestCase):
+    def _build_options(
+        self,
+        *,
+        run_time: str = "09:30",
+        retry_failed_enabled: bool = False,
+        retry_failed_limit: int = 20,
+        report_output_dir: str = "./data/exports/scheduled-reports",
+    ) -> scheduler_service.ScheduledRunOptions:
+        return scheduler_service.ScheduledRunOptions(
+            run_time=run_time,
+            retry_failed_enabled=retry_failed_enabled,
+            retry_failed_limit=retry_failed_limit,
+            report_output_dir=report_output_dir,
+        )
+
     def test_compute_next_scheduled_run_uses_today_when_time_is_in_future(self) -> None:
         now = datetime(2026, 4, 29, 8, 0, 0)
 
@@ -79,31 +94,19 @@ class SchedulerServiceTestCase(unittest.TestCase):
             commands.append((command, cwd))
             return SimpleNamespace(returncode=0)
 
-        original_time = scheduler_service.settings.scheduled_run_time
-        scheduler_service.settings.scheduled_run_time = "09:30"
-        try:
-            original_sleep_until = scheduler_service.sleep_until
-            original_write_report = scheduler_service.write_scheduled_run_report
-            scheduler_service.sleep_until = lambda target, *, now_fn, sleep_fn: None
-            scheduler_service.write_scheduled_run_report = (
-                lambda report, *, run_started_at, output_dir=None: written_reports.append(
-                    (report, run_started_at, output_dir)
-                )
-                or "mock-report.json"
+        result = scheduler_service.run_scheduled_crawl_loop(
+            stop_after_runs=1,
+            options=self._build_options(),
+            now_fn=lambda: datetime(2026, 4, 29, 8, 0, 0),
+            sleep_fn=lambda _seconds: None,
+            sleep_until_fn=lambda target, *, now_fn, sleep_fn: None,
+            command_runner=fake_command_runner,
+            python_executable="python",
+            report_writer=lambda report, *, run_started_at, output_dir=None: written_reports.append(
+                (report, run_started_at, output_dir)
             )
-            try:
-                result = scheduler_service.run_scheduled_crawl_loop(
-                    stop_after_runs=1,
-                    now_fn=lambda: datetime(2026, 4, 29, 8, 0, 0),
-                    sleep_fn=lambda _seconds: None,
-                    command_runner=fake_command_runner,
-                    python_executable="python",
-                )
-            finally:
-                scheduler_service.sleep_until = original_sleep_until
-                scheduler_service.write_scheduled_run_report = original_write_report
-        finally:
-            scheduler_service.settings.scheduled_run_time = original_time
+            or "mock-report.json",
+        )
 
         self.assertEqual(result, 0)
         self.assertEqual(len(commands), 2)
@@ -121,29 +124,17 @@ class SchedulerServiceTestCase(unittest.TestCase):
             return_code = 1 if command[-2:] == ["doctor", "--strict"] else 0
             return SimpleNamespace(returncode=return_code)
 
-        original_time = scheduler_service.settings.scheduled_run_time
-        scheduler_service.settings.scheduled_run_time = "09:30"
-        try:
-            original_sleep_until = scheduler_service.sleep_until
-            original_write_report = scheduler_service.write_scheduled_run_report
-            scheduler_service.sleep_until = lambda target, *, now_fn, sleep_fn: None
-            scheduler_service.write_scheduled_run_report = (
-                lambda report, *, run_started_at, output_dir=None: written_reports.append(report)
-                or "mock-report.json"
-            )
-            try:
-                result = scheduler_service.run_scheduled_crawl_loop(
-                    stop_after_runs=1,
-                    now_fn=lambda: datetime(2026, 4, 29, 8, 0, 0),
-                    sleep_fn=lambda _seconds: None,
-                    command_runner=fake_command_runner,
-                    python_executable="python",
-                )
-            finally:
-                scheduler_service.sleep_until = original_sleep_until
-                scheduler_service.write_scheduled_run_report = original_write_report
-        finally:
-            scheduler_service.settings.scheduled_run_time = original_time
+        result = scheduler_service.run_scheduled_crawl_loop(
+            stop_after_runs=1,
+            options=self._build_options(),
+            now_fn=lambda: datetime(2026, 4, 29, 8, 0, 0),
+            sleep_fn=lambda _seconds: None,
+            sleep_until_fn=lambda target, *, now_fn, sleep_fn: None,
+            command_runner=fake_command_runner,
+            python_executable="python",
+            report_writer=lambda report, *, run_started_at, output_dir=None: written_reports.append(report)
+            or "mock-report.json",
+        )
 
         self.assertEqual(result, 0)
         self.assertEqual(len(commands), 1)
@@ -158,35 +149,17 @@ class SchedulerServiceTestCase(unittest.TestCase):
             commands.append((command, cwd))
             return SimpleNamespace(returncode=0)
 
-        original_time = scheduler_service.settings.scheduled_run_time
-        original_retry_enabled = scheduler_service.settings.scheduled_retry_failed_enabled
-        original_retry_limit = scheduler_service.settings.scheduled_retry_failed_limit
-        scheduler_service.settings.scheduled_run_time = "09:30"
-        scheduler_service.settings.scheduled_retry_failed_enabled = True
-        scheduler_service.settings.scheduled_retry_failed_limit = 15
-        try:
-            original_sleep_until = scheduler_service.sleep_until
-            original_write_report = scheduler_service.write_scheduled_run_report
-            scheduler_service.sleep_until = lambda target, *, now_fn, sleep_fn: None
-            scheduler_service.write_scheduled_run_report = (
-                lambda report, *, run_started_at, output_dir=None: written_reports.append(report)
-                or "mock-report.json"
-            )
-            try:
-                result = scheduler_service.run_scheduled_crawl_loop(
-                    stop_after_runs=1,
-                    now_fn=lambda: datetime(2026, 4, 29, 8, 0, 0),
-                    sleep_fn=lambda _seconds: None,
-                    command_runner=fake_command_runner,
-                    python_executable="python",
-                )
-            finally:
-                scheduler_service.sleep_until = original_sleep_until
-                scheduler_service.write_scheduled_run_report = original_write_report
-        finally:
-            scheduler_service.settings.scheduled_run_time = original_time
-            scheduler_service.settings.scheduled_retry_failed_enabled = original_retry_enabled
-            scheduler_service.settings.scheduled_retry_failed_limit = original_retry_limit
+        result = scheduler_service.run_scheduled_crawl_loop(
+            stop_after_runs=1,
+            options=self._build_options(retry_failed_enabled=True, retry_failed_limit=15),
+            now_fn=lambda: datetime(2026, 4, 29, 8, 0, 0),
+            sleep_fn=lambda _seconds: None,
+            sleep_until_fn=lambda target, *, now_fn, sleep_fn: None,
+            command_runner=fake_command_runner,
+            python_executable="python",
+            report_writer=lambda report, *, run_started_at, output_dir=None: written_reports.append(report)
+            or "mock-report.json",
+        )
 
         self.assertEqual(result, 0)
         self.assertEqual(len(commands), 3)
@@ -206,35 +179,17 @@ class SchedulerServiceTestCase(unittest.TestCase):
                 return SimpleNamespace(returncode=1)
             return SimpleNamespace(returncode=0)
 
-        original_time = scheduler_service.settings.scheduled_run_time
-        original_retry_enabled = scheduler_service.settings.scheduled_retry_failed_enabled
-        original_retry_limit = scheduler_service.settings.scheduled_retry_failed_limit
-        scheduler_service.settings.scheduled_run_time = "09:30"
-        scheduler_service.settings.scheduled_retry_failed_enabled = True
-        scheduler_service.settings.scheduled_retry_failed_limit = 15
-        try:
-            original_sleep_until = scheduler_service.sleep_until
-            original_write_report = scheduler_service.write_scheduled_run_report
-            scheduler_service.sleep_until = lambda target, *, now_fn, sleep_fn: None
-            scheduler_service.write_scheduled_run_report = (
-                lambda report, *, run_started_at, output_dir=None: written_reports.append(report)
-                or "mock-report.json"
-            )
-            try:
-                result = scheduler_service.run_scheduled_crawl_loop(
-                    stop_after_runs=1,
-                    now_fn=lambda: datetime(2026, 4, 29, 8, 0, 0),
-                    sleep_fn=lambda _seconds: None,
-                    command_runner=fake_command_runner,
-                    python_executable="python",
-                )
-            finally:
-                scheduler_service.sleep_until = original_sleep_until
-                scheduler_service.write_scheduled_run_report = original_write_report
-        finally:
-            scheduler_service.settings.scheduled_run_time = original_time
-            scheduler_service.settings.scheduled_retry_failed_enabled = original_retry_enabled
-            scheduler_service.settings.scheduled_retry_failed_limit = original_retry_limit
+        result = scheduler_service.run_scheduled_crawl_loop(
+            stop_after_runs=1,
+            options=self._build_options(retry_failed_enabled=True, retry_failed_limit=15),
+            now_fn=lambda: datetime(2026, 4, 29, 8, 0, 0),
+            sleep_fn=lambda _seconds: None,
+            sleep_until_fn=lambda target, *, now_fn, sleep_fn: None,
+            command_runner=fake_command_runner,
+            python_executable="python",
+            report_writer=lambda report, *, run_started_at, output_dir=None: written_reports.append(report)
+            or "mock-report.json",
+        )
 
         self.assertEqual(result, 0)
         self.assertEqual(len(commands), 2)
