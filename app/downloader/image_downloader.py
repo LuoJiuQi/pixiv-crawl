@@ -159,7 +159,8 @@ class PixivImageDownloader:
 
     def _is_retryable_download_error(self, exc: Exception) -> bool:
         if isinstance(exc, httpx.HTTPStatusError):
-            return exc.response.status_code in self.RETRYABLE_STATUS_CODES
+            status_err: httpx.HTTPStatusError = exc
+            return status_err.response.status_code in self.RETRYABLE_STATUS_CODES
 
         return isinstance(exc, httpx.RequestError)
 
@@ -195,8 +196,9 @@ class PixivImageDownloader:
 
     def _get_retry_delay(self, attempt_index: int, exc: Exception) -> float:
         if isinstance(exc, httpx.HTTPStatusError):
+            status_err: httpx.HTTPStatusError = exc
             retry_after_seconds = self._parse_retry_after_seconds(
-                exc.response.headers.get("retry-after")
+                status_err.response.headers.get("retry-after")
             )
             if retry_after_seconds is not None:
                 return retry_after_seconds

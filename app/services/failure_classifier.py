@@ -44,7 +44,8 @@ def classify_failure(error: str | BaseException) -> str:
     - unknown
     """
     if isinstance(error, httpx.HTTPStatusError):
-        return _classify_http_status(error.response.status_code)
+        http_err: httpx.HTTPStatusError = error
+        return _classify_http_status(http_err.response.status_code)
 
     if isinstance(error, httpx.TimeoutException):
         return "timeout"

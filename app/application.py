@@ -311,6 +311,7 @@ class PixivApplication:
         if author_request is None:
             raise RuntimeError("作者抓取模式缺少作者输入，请重新选择操作。")
 
+        assert self.author_crawler is not None
         user_id = author_request["user_id"]
         limit = author_request["limit"]
         author_artwork_ids = self.author_crawler.collect_author_artwork_ids(user_id, limit=limit)
@@ -344,6 +345,7 @@ class PixivApplication:
         interactive_mode: bool,
     ) -> None:
         """按关注列表更新画师作品。"""
+        assert self.author_crawler is not None
         followed_user_ids = self.author_crawler.collect_following_user_ids(
             limit=runtime_args.following_limit if runtime_args else None,
         )
@@ -423,6 +425,8 @@ class PixivApplication:
         interactive_mode: bool,
     ) -> None:
         """批量抓取一批作品 ID。"""
+        assert self.crawler is not None
+        assert self.downloader is not None
         logger.info("本次共识别到 %s 个作品 ID。", len(artwork_ids))
         logger.debug("本次作品 ID 列表：%s", artwork_ids)
 

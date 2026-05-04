@@ -11,7 +11,7 @@ import json
 import sys
 from pathlib import Path
 from io import TextIOBase
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from collections.abc import Iterable, Mapping, Sequence
 
 from app.schemas.task import BatchRunSummary, IncrementalSelectionResult
@@ -39,7 +39,7 @@ def _emit_text(text: str, *, end: str = "\n") -> None:
         else:
             print(text, end=end)
     except UnicodeEncodeError:
-        _write_text_fallback(text + end, stream=sys.stdout)
+        _write_text_fallback(text + end, stream=cast(TextIOBase, sys.stdout))
 
 
 def _write_text_fallback(text: str, *, stream: TextIOBase) -> None:

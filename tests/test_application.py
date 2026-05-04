@@ -83,6 +83,8 @@ class PixivApplicationTestCase(unittest.TestCase):
         app.author_crawler = cast(AuthorCrawler, MagicMock())
         app.author_crawler.collect_author_artwork_ids.return_value = ["300", "200", "100"]
         app.record_repository = MagicMock()
+        app.crawler = MagicMock()
+        app.downloader = MagicMock()
         selection = IncrementalSelectionResult(
             candidate_artwork_ids=["300", "200"],
             total_available_artwork_count=3,
