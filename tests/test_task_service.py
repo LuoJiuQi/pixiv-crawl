@@ -7,7 +7,7 @@ from unittest.mock import patch
 import httpx
 
 from app.db.download_record_repository import DownloadRecord, DownloadRecordRepository
-from app.schemas.task import BatchRunSummary, FailedResult, IncrementalSelectionResult, ProcessResult
+from app.schemas.task import BatchRunSummary, IncrementalSelectionResult, ProcessResult
 from app.services import task_service
 from app.services.task_service import process_artwork, process_artwork_batch, select_incremental_artwork_ids
 

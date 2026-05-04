@@ -1,9 +1,12 @@
 import unittest
 from argparse import Namespace
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 from app.application import PixivApplication
-from app.schemas.task import BatchRunSummary, FailedResult, IncrementalSelectionResult, ProcessResult
+from app.crawler.author_crawler import AuthorCrawler
+from app.schemas.task import BatchRunSummary, IncrementalSelectionResult, ProcessResult
+from app.services.cli_service import AuthorCollectOptions
 
 
 class PixivApplicationTestCase(unittest.TestCase):
@@ -43,9 +46,9 @@ class PixivApplicationTestCase(unittest.TestCase):
 
     def test_ensure_logged_in_reuses_valid_existing_state(self) -> None:
         app = PixivApplication()
-        app.client = MagicMock()
+        app.client = cast(Any, MagicMock())
         app.client.state_manager.state_exists.return_value = True
-        app.login_service = MagicMock()
+        app.login_service = cast(Any, MagicMock())
         app.login_service.is_logged_in.return_value = True
 
         with patch("app.application.logger") as mocked_logger:
@@ -58,9 +61,9 @@ class PixivApplicationTestCase(unittest.TestCase):
 
     def test_ensure_logged_in_deletes_invalid_state_and_stops_when_login_fails(self) -> None:
         app = PixivApplication()
-        app.client = MagicMock()
+        app.client = cast(Any, MagicMock())
         app.client.state_manager.state_exists.return_value = True
-        app.login_service = MagicMock()
+        app.login_service = cast(Any, MagicMock())
         app.login_service.is_logged_in.return_value = False
         app.login_service.login_and_save_state.return_value = {"success": False}
 
@@ -74,9 +77,10 @@ class PixivApplicationTestCase(unittest.TestCase):
 
     # ---- _handle_crawl_author --------------------------------------------
 
+    # pyright: ignore[misc] — unittest requires instance methods
     def test_handle_crawl_author_returns_incremental_candidates(self) -> None:
         app = PixivApplication()
-        app.author_crawler = MagicMock()
+        app.author_crawler = cast(AuthorCrawler, MagicMock())
         app.author_crawler.collect_author_artwork_ids.return_value = ["300", "200", "100"]
         app.record_repository = MagicMock()
         selection = IncrementalSelectionResult(
@@ -93,19 +97,17 @@ class PixivApplicationTestCase(unittest.TestCase):
         with patch("app.application.select_incremental_artwork_ids", return_value=selection) as mocked_select, \
                 patch("app.application.console_service.show_incremental_selection_summary") as mocked_show_selection, \
                 patch("app.application.logger"):
-            result = app._handle_crawl_author(
-                author_request={
+            _ = app._handle_crawl_author(
+                author_request=cast(AuthorCollectOptions, {
                     "user_id": "123",
                     "limit": 20,
                     "update_mode": "incremental",
                     "completed_streak_limit": 10,
-                },
+                }),
                 interactive_mode=False,
             )
 
-        # _handle_crawl_author calls _handle_batch_crawl which returns None,
-        # so we verify the upstream logic via the mocks
-        app.author_crawler.collect_author_artwork_ids.assert_called_once_with("123", limit=20)
+        app.author_crawler.collect_author_artwork_ids.assert_called_once_with("123", limit=20)  # type: ignore[union-attr]
         mocked_select.assert_called_once_with(
             ["300", "200", "100"],
             app.record_repository,
@@ -115,13 +117,14 @@ class PixivApplicationTestCase(unittest.TestCase):
 
     # ---- _handle_crawl_following -----------------------------------------
 
+    # pyright: ignore[misc] — unittest requires instance methods
     def test_handle_crawl_following_summarizes_updated_skipped_and_failed_authors(self) -> None:
         app = PixivApplication()
         runtime_args = Namespace(following_limit=3, completed_streak_limit=10)
 
-        app.author_crawler = MagicMock()
-        app.author_crawler.collect_following_user_ids.return_value = ["1", "2", "3"]
-        app.author_crawler.collect_author_artwork_ids.side_effect = [
+        app.author_crawler = cast(AuthorCrawler, MagicMock())
+        app.author_crawler.collect_following_user_ids.return_value = ["1", "2", "3"]  # type: ignore[union-attr]
+        app.author_crawler.collect_author_artwork_ids.side_effect = [  # type: ignore[union-attr]
             ["100"],
             [],
             RuntimeError("profile failed"),
