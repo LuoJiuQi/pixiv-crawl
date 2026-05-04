@@ -28,7 +28,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 class CommandRunner(Protocol):
-    def __call__(self, command: list[str], *, cwd: str) -> subprocess.CompletedProcess[str]: ...
+    def __call__(self, command: list[str], *, cwd: str) -> subprocess.CompletedProcess[bytes]: ...
 
 
 @dataclass(frozen=True)
@@ -61,7 +61,7 @@ def compute_next_scheduled_run(now: datetime, time_text: str) -> datetime:
     return candidate
 
 
-def sleep_until(target: datetime, *, now_fn: CallableABC[..., object] = datetime.now, sleep_fn: CallableABC[..., object] = time.sleep) -> None:
+def sleep_until(target: datetime, *, now_fn: CallableABC[[], datetime] = datetime.now, sleep_fn: CallableABC[[float], None] = time.sleep) -> None:
     while True:
         remaining_seconds = (target - now_fn()).total_seconds()
         if remaining_seconds <= 0:
@@ -138,7 +138,7 @@ def run_scheduled_crawl_loop(
     now_fn: Callable[[], datetime] = datetime.now,
     sleep_fn: Callable[[float], None] = time.sleep,
     sleep_until_fn: Callable[..., None] = sleep_until,
-    command_runner: CommandRunner = lambda command, *, cwd: subprocess.run(command, cwd=cwd, check=False),
+    command_runner: CommandRunner = lambda command, *, cwd: subprocess.run(command, cwd=cwd, check=False),  # pyright: ignore[reportAssignmentType]
     python_executable: str | None = None,
     report_writer: Callable[..., str] = write_scheduled_run_report,
 ) -> int:

@@ -79,12 +79,11 @@ class BrowserClient:
         playwright = sync_playwright().start()
         self.playwright = playwright
 
-        proxy_config: ProxySettings | None = None
-
         # 如果配置了代理，就在浏览器启动阶段一起接上。
         # 这样页面访问、登录流程、站内接口请求都会走同一条代理链路。
+        proxy_config: ProxySettings | None = None
         if settings.proxy_server.strip():
-            proxy_config: dict[str, str] = {
+            proxy_config = {
                 "server": settings.proxy_server.strip(),
             }
             if settings.proxy_username.strip():
