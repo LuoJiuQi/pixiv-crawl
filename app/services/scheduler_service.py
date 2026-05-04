@@ -16,6 +16,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
+from collections.abc import Callable as CallableABC
 from typing import Callable, Protocol
 
 from app.core.config import settings
@@ -60,7 +61,7 @@ def compute_next_scheduled_run(now: datetime, time_text: str) -> datetime:
     return candidate
 
 
-def sleep_until(target: datetime, *, now_fn: callable = datetime.now, sleep_fn: callable = time.sleep) -> None:
+def sleep_until(target: datetime, *, now_fn: CallableABC[..., object] = datetime.now, sleep_fn: CallableABC[..., object] = time.sleep) -> None:
     while True:
         remaining_seconds = (target - now_fn()).total_seconds()
         if remaining_seconds <= 0:
