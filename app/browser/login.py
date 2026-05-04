@@ -12,7 +12,7 @@
 
 from typing import Any, TypedDict
 
-from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError  # noqa
 
 from app.browser.client import BrowserClient
 from app.core.config import settings
@@ -86,6 +86,7 @@ class PixivLoginService:
         """
         self.last_login_issue = issue
 
+    # pyright: ignore[misc] — self 未使用但保留以保持调用一致性
     def _build_result(
         self,
         *,
@@ -118,8 +119,7 @@ class PixivLoginService:
         consent_button = self._find_cookie_banner_button(page)
         if consent_button is None:
             return
-
-        consent_button.click()
+        consent_button.click()  # pyright: ignore[reportOptionalMemberAccess]
         page.wait_for_timeout(800)
 
     def _get_login_form(self):
@@ -182,13 +182,14 @@ class PixivLoginService:
 
         return form.locator("button").first
 
-    def _locator_exists(self, locator: Any) -> bool:
+    @staticmethod
+    def _locator_exists(locator: Any) -> bool:  # pyright: ignore[misc]
         """
         判断 locator 是否至少命中一个节点。
         """
         try:
             return locator.count() > 0
-        except Exception:
+        except Exception:  # noqa: BLE001
             return False
 
     def _locator_is_visible(self, locator: Any) -> bool:
@@ -197,9 +198,10 @@ class PixivLoginService:
         """
         try:
             return self._locator_exists(locator) and bool(locator.is_visible())
-        except Exception:
+        except Exception:  # noqa: BLE001
             return False
 
+    # pyright: ignore[misc] — self 未使用但保留以保持调用一致性
     def _credentials_ready(self) -> bool:
         """
         判断配置里是否已经提供了账号密码。
@@ -213,7 +215,7 @@ class PixivLoginService:
         page = self.client.get_page()
         try:
             body_text = page.locator("body").inner_text()
-        except Exception:
+        except Exception:  # noqa: BLE001
             logger.debug("读取登录页 body 文本失败，暂时无法判断是否出现 reCAPTCHA 提示。", exc_info=True)
             return False
         return any(hint in body_text for hint in self.RECAPTCHA_HINTS)
@@ -230,7 +232,7 @@ class PixivLoginService:
             username_input = page.locator(self.USERNAME_SELECTOR).first
             password_input = page.locator(self.PASSWORD_SELECTOR).first
             return self._locator_is_visible(username_input) or self._locator_is_visible(password_input)
-        except Exception:
+        except Exception:  # noqa: BLE001
             logger.debug("检查登录表单失败，暂时按未发现登录表单处理。", exc_info=True)
             return False
 
@@ -411,7 +413,7 @@ class PixivLoginService:
         try:
             page.goto(self.LOGIN_CHECK_URL, wait_until="domcontentloaded")
             page.wait_for_timeout(1000)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("访问 Pixiv 登录态检查页失败：%s", e)
             return False
 
