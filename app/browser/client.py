@@ -76,7 +76,8 @@ class BrowserClient:
         self.state_manager.ensure_state_dir()
 
         # 启动 Playwright 的同步接口。
-        self.playwright = sync_playwright().start()
+        playwright = sync_playwright().start()
+        self.playwright = playwright
 
         proxy_config: ProxySettings | None = None
 
@@ -93,7 +94,7 @@ class BrowserClient:
 
         # 启动 Chromium 浏览器。
         # 是否显示窗口，由配置里的 `headless` 决定。
-        self.browser = self.playwright.chromium.launch(
+        self.browser = playwright.chromium.launch(
             headless=settings.headless,
             proxy=proxy_config,
         )
@@ -101,15 +102,18 @@ class BrowserClient:
         # 如果本地已经有保存过的登录状态，就直接复用。
         # 这样通常不需要每次启动都重新登录。
         if self.state_manager.state_exists():
+            assert self.browser is not None
             self.context = self.browser.new_context(
                 storage_state=self.state_manager.get_state_file()
             )
         else:
             # 没有登录状态时，就创建一个全新的上下文。
+            assert self.browser is not None
             self.context = self.browser.new_context()
 
         # 设置默认超时时间。
         # 后续的大多数页面操作都会自动使用这个超时值。
+        assert self.context is not None
         self.context.set_default_timeout(settings.timeout)
 
         # 创建一个页面对象。
