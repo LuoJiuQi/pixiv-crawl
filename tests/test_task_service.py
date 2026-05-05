@@ -200,8 +200,8 @@ class TaskServiceTestCase(unittest.TestCase):
         mocked.assert_called_once()
         self.assertIsNotNone(record)
         record = cast(DownloadRecord, record)
-        self.assertEqual(record["status"], "completed")
-        self.assertEqual(record["downloaded_files"], [str(Path(temp_dir) / "redownloaded.jpg")])
+        self.assertEqual(record.status, "completed")
+        self.assertEqual(record.downloaded_files, [str(Path(temp_dir) / "redownloaded.jpg")])
 
     def test_process_artwork_batch_reprocesses_completed_record_when_file_is_empty(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -320,8 +320,8 @@ class TaskServiceTestCase(unittest.TestCase):
         self.assertEqual(len(summary.failed_results), 1)
         self.assertIsNotNone(record)
         record = cast(DownloadRecord, record)
-        self.assertEqual(record["status"], "failed")
-        self.assertEqual(record["error_type"], "rate_limit")
+        self.assertEqual(record.status, "failed")
+        self.assertEqual(record.error_type, "rate_limit")
 
     def test_process_artwork_batch_replays_real_failure_samples_into_retryable_buckets(self) -> None:
         rate_limit_request = httpx.Request("GET", "https://i.pximg.net/rate-limit.jpg")
@@ -375,9 +375,9 @@ class TaskServiceTestCase(unittest.TestCase):
             )
 
         self.assertEqual(len(summary.failed_results), 3)
-        self.assertEqual([record["artwork_id"] for record in rate_limit_records], ["100"])
-        self.assertEqual([record["artwork_id"] for record in http_5xx_records], ["200"])
-        self.assertEqual([record["artwork_id"] for record in timeout_records], ["300"])
+        self.assertEqual([record.artwork_id for record in rate_limit_records], ["100"])
+        self.assertEqual([record.artwork_id for record in http_5xx_records], ["200"])
+        self.assertEqual([record.artwork_id for record in timeout_records], ["300"])
 
     def test_process_artwork_skips_debug_artifacts_when_disabled(self) -> None:
         fake_info = type(

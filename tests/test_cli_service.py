@@ -4,7 +4,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import MagicMock, patch
 
-from app.db.download_record_repository import DownloadRecordRepository
+from app.db.download_record_repository import DownloadRecord, DownloadRecordRepository
 from app.services.cli_service import (
     archive_old_records,
     choose_action,
@@ -140,7 +140,7 @@ class CliServiceTestCase(unittest.TestCase):
 
         mocked_show_records.assert_called_once()
         shown_records = mocked_show_records.call_args.args[1]
-        self.assertEqual([record["artwork_id"] for record in shown_records], ["100"])
+        self.assertEqual([record.artwork_id for record in shown_records], ["100"])
 
     def test_collect_retry_artwork_ids_shows_empty_failed_hint_via_console(self) -> None:
         mock_repository = MagicMock()
@@ -159,8 +159,8 @@ class CliServiceTestCase(unittest.TestCase):
         mock_repository.get_status_summary.return_value = {"failed": 3}
         mock_repository.get_error_type_summary.return_value = {"timeout": 2}
         mock_repository.list_records.return_value = [
-            {"artwork_id": "100"},
-            {"artwork_id": "200"},
+            DownloadRecord(artwork_id="100"),
+            DownloadRecord(artwork_id="200"),
         ]
 
         with patch("app.services.cli_service.console_service.prompt") as mocked_prompt, patch(
@@ -209,7 +209,7 @@ class CliServiceTestCase(unittest.TestCase):
         mock_repository = MagicMock()
         mock_repository.get_status_summary.return_value = {"failed": 3}
         mock_repository.get_error_type_summary.return_value = {"timeout": 3}
-        mock_repository.list_records.return_value = [{"artwork_id": "100"}]
+        mock_repository.list_records.return_value = [DownloadRecord(artwork_id="100")]
 
         with patch("app.services.cli_service.console_service.prompt") as mocked_prompt, patch(
             "app.services.cli_service.console_service.show_summary"
@@ -241,7 +241,7 @@ class CliServiceTestCase(unittest.TestCase):
             file_format="txt",
         )
         mocked_export_records.assert_called_once_with(
-            [{"artwork_id": "100"}],
+            [DownloadRecord(artwork_id="100")],
             Path("data/exports/failed_timeout.txt"),
             file_format="txt",
         )
@@ -249,7 +249,7 @@ class CliServiceTestCase(unittest.TestCase):
     def test_archive_old_records_uses_noninteractive_arguments_without_prompting(self) -> None:
         mock_repository = MagicMock()
         mock_repository.get_status_summary.return_value = {"completed": 5, "failed": 1}
-        mock_repository.list_records.return_value = [{"artwork_id": "100"}]
+        mock_repository.list_records.return_value = [DownloadRecord(artwork_id="100")]
         mock_repository.delete_records.return_value = 1
         fixed_now = datetime(2026, 4, 20, 12, 0, 0)
 
@@ -293,7 +293,7 @@ class CliServiceTestCase(unittest.TestCase):
             file_format="txt",
         )
         mocked_export_records.assert_called_once_with(
-            [{"artwork_id": "100"}],
+            [DownloadRecord(artwork_id="100")],
             Path("data/exports/archived_records_failed.txt"),
             file_format="txt",
         )

@@ -17,25 +17,28 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterator, TypedDict
+from typing import Any, Iterator
+
+from pydantic import BaseModel, Field
 
 from app.core.config import settings
 
 
-class DownloadRecord(TypedDict):
-    artwork_id: str
-    title: str
-    author_name: str
-    page_count: int
-    status: str
-    error_type: str
-    download_count: int
-    saved_html: str
-    saved_json: str
-    downloaded_files: list[str]
-    error_message: str
-    created_at: str
-    updated_at: str
+class DownloadRecord(BaseModel):
+    """下载记录数据模型。"""
+    artwork_id: str = ""
+    title: str = ""
+    author_name: str = ""
+    page_count: int = 0
+    status: str = ""
+    error_type: str = ""
+    download_count: int = 0
+    saved_html: str = ""
+    saved_json: str = ""
+    downloaded_files: list[str] = Field(default_factory=list)
+    error_message: str = ""
+    created_at: str = ""
+    updated_at: str = ""
 
 
 class DownloadRecordRepository:
@@ -164,21 +167,21 @@ class DownloadRecordRepository:
         if row is None:
             return None
 
-        return {
-            "artwork_id": row["artwork_id"],
-            "title": row["title"],
-            "author_name": row["author_name"],
-            "page_count": row["page_count"],
-            "status": row["status"],
-            "error_type": row["error_type"],
-            "download_count": row["download_count"],
-            "saved_html": row["saved_html"],
-            "saved_json": row["saved_json"],
-            "downloaded_files": json.loads(row["downloaded_files_json"]),
-            "error_message": row["error_message"],
-            "created_at": row["created_at"],
-            "updated_at": row["updated_at"],
-        }
+        return DownloadRecord(
+            artwork_id=row["artwork_id"],
+            title=row["title"],
+            author_name=row["author_name"],
+            page_count=row["page_count"],
+            status=row["status"],
+            error_type=row["error_type"],
+            download_count=row["download_count"],
+            saved_html=row["saved_html"],
+            saved_json=row["saved_json"],
+            downloaded_files=json.loads(row["downloaded_files_json"]),
+            error_message=row["error_message"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
 
     def is_artwork_completed(self, artwork_id: str) -> bool:
         """
@@ -189,7 +192,7 @@ class DownloadRecordRepository:
         - 状态是 `completed`
         """
         record = self.get_record(artwork_id)
-        return bool(record and record["status"] == "completed")
+        return bool(record and record.status == "completed")
 
     def upsert_record(
         self,
@@ -365,21 +368,21 @@ class DownloadRecordRepository:
         records: list[DownloadRecord] = []
         for row in rows:
             records.append(
-                {
-                    "artwork_id": row["artwork_id"],
-                    "title": row["title"],
-                    "author_name": row["author_name"],
-                    "page_count": row["page_count"],
-                    "status": row["status"],
-                    "error_type": row["error_type"],
-                    "download_count": row["download_count"],
-                    "saved_html": row["saved_html"],
-                    "saved_json": row["saved_json"],
-                    "downloaded_files": json.loads(row["downloaded_files_json"]),
-                    "error_message": row["error_message"],
-                    "created_at": row["created_at"],
-                    "updated_at": row["updated_at"],
-                }
+                DownloadRecord(
+                    artwork_id=row["artwork_id"],
+                    title=row["title"],
+                    author_name=row["author_name"],
+                    page_count=row["page_count"],
+                    status=row["status"],
+                    error_type=row["error_type"],
+                    download_count=row["download_count"],
+                    saved_html=row["saved_html"],
+                    saved_json=row["saved_json"],
+                    downloaded_files=json.loads(row["downloaded_files_json"]),
+                    error_message=row["error_message"],
+                    created_at=row["created_at"],
+                    updated_at=row["updated_at"],
+                )
             )
 
         return records

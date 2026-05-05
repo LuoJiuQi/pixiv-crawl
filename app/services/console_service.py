@@ -95,8 +95,8 @@ def show_records(title: str, records: Sequence[Mapping[str, object]]) -> None:
         return
 
     for index, record in enumerate(records, start=1):
-        _emit_text(f"{index}. artwork_id = {record.get('artwork_id', '')}")
-        for key, value in record.items():
+        _emit_text(f"{index}. artwork_id = {record.artwork_id}")
+        for key, value in record.model_dump().items():
             if key == "artwork_id" or value in {"", None}:
                 continue
             _emit_text(f"   {key} = {value}")

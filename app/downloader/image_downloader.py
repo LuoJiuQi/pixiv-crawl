@@ -292,51 +292,6 @@ class PixivImageDownloader:
 
         raise RuntimeError("下载重试次数已耗尽")  # pragma: no cover
 
-    def _build_download_plan(self, artwork: ArtworkInfo) -> list[tuple[int, str]]:
-        return self.planner.build_download_plan(artwork)
-
-    def _normalize_url(self, url: str) -> str:
-        return self.planner._normalize_url(url)
-
-    def _fetch_artwork_pages_data(self, artwork: ArtworkInfo) -> list[dict]:
-        return self.planner._fetch_artwork_pages_data(artwork)
-
-    def _enrich_artwork_from_pages_api(self, artwork: ArtworkInfo) -> ArtworkInfo:
-        pages_data = self._fetch_artwork_pages_data(artwork)
-        if not pages_data:
-            return artwork
-
-        page_urls: list[str] = []
-        for item in pages_data:
-            if not isinstance(item, dict):
-                continue
-
-            urls = item.get("urls", {})
-            if not isinstance(urls, dict):
-                continue
-
-            for key in ("original", "regular", "small", "thumb_mini"):
-                value = urls.get(key)
-                if isinstance(value, str) and value.strip():
-                    page_urls.append(self._normalize_url(value))
-
-        if not page_urls:
-            return artwork
-
-        merged_urls = list(dict.fromkeys(page_urls + artwork.possible_image_urls))
-        return artwork.model_copy(
-            update={
-                "possible_image_urls": merged_urls,
-                "page_count": max(artwork.page_count, len(pages_data)),
-            }
-        )
-
-    def _plan_looks_like_preview_only(self, download_plan: list[tuple[int, str]]) -> bool:
-        return self.planner._plan_looks_like_preview_only(download_plan)
-
-    def _extract_live_page_image_urls(self, artwork_id: str) -> list[str]:
-        return self.planner._extract_live_page_image_urls(artwork_id)
-
     def _infer_extension(self, url: str, content_type: str | None = None) -> str:
         return self.path_builder.infer_extension(url, content_type=content_type)
 
@@ -382,26 +337,6 @@ class PixivImageDownloader:
             total_pages=total_pages,
         )
 
-    def _prepare_download_targets(self, artwork: ArtworkInfo) -> tuple[ArtworkInfo, list[tuple[int, str]]]:
-        """
-        先把作品补全成“适合下载判断”的状态，再生成最终下载计划。
-
-        这样后面的“是否已下载完成”和“真正开始下载”都能复用同一套准备逻辑，
-        避免两边判断标准不一致。
-        """
-        artwork = self._enrich_artwork_from_pages_api(artwork)
-        download_plan = self._build_download_plan(artwork)
-
-        # 如果当前计划看起来只拿到了分享预览图，就从真实页面 DOM 再补抓一次。
-        if self._plan_looks_like_preview_only(download_plan):
-            live_urls = self._extract_live_page_image_urls(artwork.artwork_id)
-            if live_urls:
-                enhanced_urls = list(dict.fromkeys(artwork.possible_image_urls + live_urls))
-                artwork = artwork.model_copy(update={"possible_image_urls": enhanced_urls})
-                download_plan = self._build_download_plan(artwork)
-
-        return PreparedArtworkDownload(artwork=artwork, plan=download_plan)
-
     def _find_existing_file_for_page(
         self,
         artwork: ArtworkInfo,
@@ -443,7 +378,7 @@ class PixivImageDownloader:
         - 判断是否已下载
         - 真正执行下载
         """
-        return self._prepare_download_targets(artwork)
+        return self.planner.prepare_download_targets(artwork)
 
     def is_prepared_artwork_downloaded(
         self,

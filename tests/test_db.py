@@ -29,10 +29,10 @@ class DownloadRecordRepositoryTestCase(unittest.TestCase):
 
         self.assertIsNotNone(record)
         record = cast(DownloadRecord, record)
-        self.assertEqual(record["status"], "completed")
-        self.assertEqual(record["error_type"], "")
-        self.assertEqual(record["title"], "ヤチいろ")
-        self.assertEqual(record["downloaded_files"], ["./data/images/142463788/142463788_p0.jpg"])
+        self.assertEqual(record.status, "completed")
+        self.assertEqual(record.error_type, "")
+        self.assertEqual(record.title, "ヤチいろ")
+        self.assertEqual(record.downloaded_files, ["./data/images/142463788/142463788_p0.jpg"])
 
     def test_is_artwork_completed_only_returns_true_for_completed_status(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -83,10 +83,10 @@ class DownloadRecordRepositoryTestCase(unittest.TestCase):
                 updated_before="9999-01-01T00:00:00",
             )
 
-        self.assertEqual([record["artwork_id"] for record in completed_records], ["300", "100"])
+        self.assertEqual([record.artwork_id for record in completed_records], ["300", "100"])
         self.assertEqual(len(latest_two_records), 2)
-        self.assertEqual([record["artwork_id"] for record in timeout_failed_records], ["200"])
-        self.assertEqual([record["artwork_id"] for record in old_completed_records], ["300", "100"])
+        self.assertEqual([record.artwork_id for record in timeout_failed_records], ["200"])
+        self.assertEqual([record.artwork_id for record in old_completed_records], ["300", "100"])
 
     def test_get_status_summary_counts_each_status(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -164,16 +164,16 @@ class DownloadRecordRepositoryTestCase(unittest.TestCase):
 
         self.assertIsNotNone(record)
         record = cast(DownloadRecord, record)
-        self.assertEqual(record["status"], "failed")
-        self.assertEqual(record["error_type"], "timeout")
-        self.assertEqual(record["error_message"], "timeout")
-        self.assertEqual(record["title"], "A")
-        self.assertEqual(record["author_name"], "Author")
-        self.assertEqual(record["page_count"], 1)
-        self.assertEqual(record["download_count"], 1)
-        self.assertEqual(record["saved_html"], "./data/temp/html/artwork_100.html")
-        self.assertEqual(record["saved_json"], "./data/temp/json/artwork_100.json")
-        self.assertEqual(record["downloaded_files"], [str(downloaded_file)])
+        self.assertEqual(record.status, "failed")
+        self.assertEqual(record.error_type, "timeout")
+        self.assertEqual(record.error_message, "timeout")
+        self.assertEqual(record.title, "A")
+        self.assertEqual(record.author_name, "Author")
+        self.assertEqual(record.page_count, 1)
+        self.assertEqual(record.download_count, 1)
+        self.assertEqual(record.saved_html, "./data/temp/html/artwork_100.html")
+        self.assertEqual(record.saved_json, "./data/temp/json/artwork_100.json")
+        self.assertEqual(record.downloaded_files, [str(downloaded_file)])
 
 
 if __name__ == "__main__":

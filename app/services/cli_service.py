@@ -306,7 +306,7 @@ def collect_retry_artwork_ids(
         limit = failed_count
 
     records = record_repository.list_records(limit=limit, status="failed", error_type=error_type)
-    artwork_ids = [str(record["artwork_id"]) for record in records]
+    artwork_ids = [str(record.artwork_id) for record in records]
 
     console_service.show_list("本次将重试的作品 ID", artwork_ids)
     return artwork_ids
@@ -421,7 +421,7 @@ def archive_old_records(
         return
 
     console_service.show_summary("归档预览", [("record_count", len(records))])
-    console_service.show_list("示例作品", [record["artwork_id"] for record in records[:10]])
+    console_service.show_list("示例作品", [record.artwork_id for record in records[:10]])
 
     if interactive:
         confirm = console_service.prompt("确认执行归档并删除这些记录吗？输入 yes 确认：").strip().lower()
@@ -440,7 +440,7 @@ def archive_old_records(
     exported_path = export_records(records, output_path, file_format=file_format)
 
     deleted_count = record_repository.delete_records(
-        [str(record["artwork_id"]) for record in records]
+        [str(record.artwork_id) for record in records]
     )
 
     console_service.show_success(f"已归档 {len(records)} 条记录。")

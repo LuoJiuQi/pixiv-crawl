@@ -139,7 +139,7 @@ def select_incremental_artwork_ids(
             continue
 
         # 以前失败过的作品，这次继续纳入候选。
-        if record["status"] != "completed":
+        if record.status != "completed":
             candidate_artwork_ids.append(artwork_id)
             retry_artwork_ids.append(artwork_id)
             completed_streak = 0
@@ -186,13 +186,13 @@ def _build_completed_result_from_record(
     """
     return ProcessResult(
         artwork_id=artwork_id,
-        title=str(existing_record["title"]),
-        author_name=str(existing_record["author_name"]),
-        page_count=int(existing_record["page_count"]),
-        download_count=int(existing_record["download_count"]),
-        saved_html=str(existing_record["saved_html"]),
-        saved_json=str(existing_record["saved_json"]),
-        downloaded_files=list(existing_record["downloaded_files"]),
+        title=str(existing_record.title),
+        author_name=str(existing_record.author_name),
+        page_count=int(existing_record.page_count),
+        download_count=int(existing_record.download_count),
+        saved_html=str(existing_record.saved_html),
+        saved_json=str(existing_record.saved_json),
+        downloaded_files=list(existing_record.downloaded_files),
         skipped_download=True,
         skipped_by_db=True,
     )
@@ -205,7 +205,7 @@ def _completed_record_files_exist(existing_record: DownloadRecord) -> bool:
     只要缺少任意一个文件，就认为这条记录已经不能安全跳过，
     需要重新进入正常处理流程自愈。
     """
-    downloaded_files = existing_record.get("downloaded_files")
+    downloaded_files = existing_record.downloaded_files
     if not isinstance(downloaded_files, list) or not downloaded_files:
         return False
 
@@ -238,7 +238,7 @@ def process_artwork_batch(
         logger.debug("========== 开始处理第 %s/%s 个作品：%s ==========", index, len(artwork_ids), artwork_id)
 
         existing_record = record_repository.get_record(artwork_id)
-        if existing_record and existing_record["status"] == "completed":
+        if existing_record and existing_record.status == "completed":
             if _completed_record_files_exist(existing_record):
                 logger.debug("作品 %s 已在数据库中标记为完成，直接跳过整套任务。", artwork_id)
                 success_results.append(

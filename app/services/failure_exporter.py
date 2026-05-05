@@ -31,7 +31,7 @@ def build_failure_export_path(
 
 
 def export_failure_records(
-    records: Sequence[Mapping[str, Any]],
+    records: Sequence[DownloadRecord],
     output_path: str | Path,
     *,
     file_format: str = "json",

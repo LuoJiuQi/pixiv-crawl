@@ -2,6 +2,7 @@ import json
 import unittest
 from tempfile import TemporaryDirectory
 
+from app.db.download_record_repository import DownloadRecord
 from app.services.failure_exporter import build_failure_export_path, export_failure_records
 
 
@@ -14,12 +15,12 @@ class FailureExporterTestCase(unittest.TestCase):
 
     def test_export_failure_records_writes_json(self) -> None:
         records = [
-            {
-                "artwork_id": "100",
-                "status": "failed",
-                "error_type": "timeout",
-                "error_message": "timeout",
-            }
+            DownloadRecord(
+                artwork_id="100",
+                status="failed",
+                error_type="timeout",
+                error_message="timeout",
+            )
         ]
 
         with TemporaryDirectory() as temp_dir:
@@ -32,15 +33,15 @@ class FailureExporterTestCase(unittest.TestCase):
 
     def test_export_failure_records_writes_txt(self) -> None:
         records = [
-            {
-                "artwork_id": "200",
-                "status": "failed",
-                "error_type": "download",
-                "title": "sample",
-                "author_name": "author",
-                "updated_at": "2026-03-23T12:00:00",
-                "error_message": "download failed",
-            }
+            DownloadRecord(
+                artwork_id="200",
+                status="failed",
+                error_type="download",
+                title="sample",
+                author_name="author",
+                updated_at="2026-03-23T12:00:00",
+                error_message="download failed",
+            )
         ]
 
         with TemporaryDirectory() as temp_dir:

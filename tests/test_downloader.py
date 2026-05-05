@@ -89,25 +89,18 @@ def make_client_with_page(page: DummyPage) -> BrowserClient:
     return cast(BrowserClient, DummyClient(page))
 
 
-class StubPagesDownloader(PixivImageDownloader):
-    def __init__(self, pages_data):
-        super().__init__(make_dummy_client())
-        self._pages_data = pages_data
-
-    def _fetch_artwork_pages_data(self, artwork: ArtworkInfo) -> list[dict]:
-        return self._pages_data
-
-
 class LocalOnlyDownloader(PixivImageDownloader):
-    def _fetch_artwork_pages_data(self, artwork: ArtworkInfo) -> list[dict]:
-        return []
+    """跳过 API 补全，直接用静态 possible_image_urls 生成下载计划。"""
 
-    def _extract_live_page_image_urls(self, artwork_id: str) -> list[str]:
-        return []
+    def prepare_artwork_download(self, artwork: ArtworkInfo) -> PreparedArtworkDownload:
+        plan = self.planner.build_download_plan(artwork)
+        return PreparedArtworkDownload(artwork=artwork, plan=plan)
 
 
 class StreamFriendlyDownloader(LocalOnlyDownloader):
-    def _prepare_download_targets(self, artwork: ArtworkInfo) -> PreparedArtworkDownload:
+    """用 possible_image_urls 的第一条生成单页下载计划，忽略补全逻辑。"""
+
+    def prepare_artwork_download(self, artwork: ArtworkInfo) -> PreparedArtworkDownload:
         return PreparedArtworkDownload(artwork=artwork, plan=[(0, artwork.possible_image_urls[0])])
 
 
