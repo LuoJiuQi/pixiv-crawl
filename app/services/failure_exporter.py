@@ -6,9 +6,9 @@
 """
 
 from pathlib import Path
-from collections.abc import Mapping, Sequence
-from typing import Any
+from collections.abc import Sequence
 
+from app.db.download_record_repository import DownloadRecord
 from app.services.record_exporter import build_record_export_path, export_records
 
 
