@@ -1,11 +1,16 @@
 import re
 from html import unescape
+from typing import NamedTuple
 
 from app.browser.client import BrowserClient
 from app.core.logging_config import get_logger
 from app.schemas.artwork import ArtworkInfo
 
-PreparedArtworkDownload = tuple[ArtworkInfo, list[tuple[int, str]]]
+
+class PreparedArtworkDownload(NamedTuple):
+    """准备完成的下载信息：包含补全后的作品信息和下载计划。"""
+    artwork: ArtworkInfo
+    plan: list[tuple[int, str]]
 
 
 logger = get_logger(__name__)
@@ -271,4 +276,4 @@ class DownloadPlanner:
                 artwork = artwork.model_copy(update={"possible_image_urls": enhanced_urls})
                 download_plan = self.build_download_plan(artwork)
 
-        return artwork, download_plan
+        return PreparedArtworkDownload(artwork=artwork, plan=download_plan)

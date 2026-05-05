@@ -40,7 +40,8 @@ class DummyDownloader:
         return ["downloaded.jpg"]
 
     def prepare_artwork_download(self, info):
-        return {"artwork": info, "download_plan": [(0, "https://example.com/image.jpg")]}
+        from app.downloader.download_planner import PreparedArtworkDownload
+        return PreparedArtworkDownload(artwork=info, plan=[(0, "https://example.com/image.jpg")])
 
     def is_prepared_artwork_downloaded(self, prepared) -> tuple[bool, list[str]]:
         return False, []
@@ -446,7 +447,8 @@ class TaskServiceTestCase(unittest.TestCase):
 
             def prepare_artwork_download(self, info):
                 self.prepare_calls += 1
-                return {"artwork": info, "download_plan": [(0, "https://example.com/image.jpg")]}
+                from app.downloader.download_planner import PreparedArtworkDownload
+                return PreparedArtworkDownload(artwork=info, plan=[(0, "https://example.com/image.jpg")])
 
             def download_prepared_artwork(self, prepared) -> list[str]:
                 self.received_prepared = prepared
@@ -468,7 +470,7 @@ class TaskServiceTestCase(unittest.TestCase):
             )
 
         self.assertEqual(downloader.prepare_calls, 1)
-        self.assertEqual(downloader.received_prepared["artwork"], fake_info)
+        self.assertEqual(downloader.received_prepared.artwork, fake_info)
         self.assertEqual(result.downloaded_files, ["downloaded.jpg"])
 
     def test_process_artwork_emits_debug_logs_for_page_state(self) -> None:

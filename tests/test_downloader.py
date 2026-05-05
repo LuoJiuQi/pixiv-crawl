@@ -8,6 +8,7 @@ import httpx
 
 from app.browser.client import BrowserClient
 from app.core.config import settings
+from app.downloader.download_planner import PreparedArtworkDownload
 from app.downloader.image_downloader import PixivImageDownloader
 from app.schemas.artwork import ArtworkInfo
 
@@ -106,8 +107,8 @@ class LocalOnlyDownloader(PixivImageDownloader):
 
 
 class StreamFriendlyDownloader(LocalOnlyDownloader):
-    def _prepare_download_targets(self, artwork: ArtworkInfo) -> tuple[ArtworkInfo, list[tuple[int, str]]]:
-        return artwork, [(0, artwork.possible_image_urls[0])]
+    def _prepare_download_targets(self, artwork: ArtworkInfo) -> PreparedArtworkDownload:
+        return PreparedArtworkDownload(artwork=artwork, plan=[(0, artwork.possible_image_urls[0])])
 
 
 class PixivImageDownloaderTestCase(unittest.TestCase):

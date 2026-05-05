@@ -400,7 +400,7 @@ class PixivImageDownloader:
                 artwork = artwork.model_copy(update={"possible_image_urls": enhanced_urls})
                 download_plan = self._build_download_plan(artwork)
 
-        return artwork, download_plan
+        return PreparedArtworkDownload(artwork=artwork, plan=download_plan)
 
     def _find_existing_file_for_page(
         self,
@@ -452,15 +452,14 @@ class PixivImageDownloader:
         """
         基于已经准备好的下载信息判断作品是否已完整下载。
         """
-        artwork, download_plan = prepared
-        if not download_plan:
+        if not prepared.plan:
             return False, []
 
         existing_files: list[str] = []
-        total_pages = len(download_plan)
-        for page_index, _ in download_plan:
+        total_pages = len(prepared.plan)
+        for page_index, _ in prepared.plan:
             existing_file = self._find_existing_file_for_page(
-                artwork,
+                prepared.artwork,
                 page_index,
                 total_pages=total_pages,
             )
@@ -489,7 +488,8 @@ class PixivImageDownloader:
         """
         基于已经准备好的下载信息执行真正的下载。
         """
-        artwork, download_plan = prepared
+        artwork = prepared.artwork
+        download_plan = prepared.plan
 
         if not download_plan:
             raise RuntimeError(f"未找到可下载图片 URL，作品 ID: {artwork.artwork_id}")
