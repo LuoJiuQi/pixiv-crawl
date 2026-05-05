@@ -626,30 +626,20 @@ class MainInputParsingTestCase(unittest.TestCase):
         ), patch(
             "app.application.choose_action"
         ) as mocked_choose_action, patch(
-            "app.application.select_incremental_artwork_ids",
-            return_value=selection,
-        ) as mocked_select_incremental_artwork_ids, patch(
-            "app.application.process_artwork_batch",
-            return_value=summary,
-        ) as mocked_process_artwork_batch, patch(
-            "app.application.console_service.show_incremental_selection_summary"
-        ), patch(
-            "app.application.console_service.show_batch_summary"
-        ), patch(
-            "app.application.console_service.show_following_update_summary"
-        ), patch(
+            "app.application.process_following_authors",
+        ) as mocked_process_following, patch(
             "app.application.console_service.pause_before_exit"
         ) as mocked_pause:
             main.main(["crawl-following", "--limit", "3", "--completed-streak-limit", "15"])
 
         mocked_choose_action.assert_not_called()
         mock_author_crawler.collect_following_user_ids.assert_called_once_with(limit=3)
-        mocked_select_incremental_artwork_ids.assert_called_once_with(
-            ["100"],
-            mock_repository,
-            completed_streak_limit=15,
-        )
-        mocked_process_artwork_batch.assert_called_once()
+        mocked_process_following.assert_called_once()
+        call_args = mocked_process_following.call_args[1]
+        self.assertEqual(call_args["followed_user_ids"], ["123"])
+        self.assertIs(call_args["author_crawler"], mock_author_crawler)
+        self.assertIs(call_args["record_repository"], mock_repository)
+        self.assertEqual(call_args["completed_streak_limit"], 15)
         mocked_pause.assert_not_called()
         mock_client.close.assert_called_once()
 

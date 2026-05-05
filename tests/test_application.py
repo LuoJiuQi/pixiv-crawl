@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 from app.application import PixivApplication
 from app.crawler.author_crawler import AuthorCrawler
-from app.schemas.task import BatchRunSummary, IncrementalSelectionResult, ProcessResult
+from app.schemas.task import BatchRunSummary, IncrementalSelectionResult
 from app.services.cli_service import AuthorCollectOptions
 from app.services.doctor_service import DoctorCheck, DoctorReport
 
@@ -123,57 +123,26 @@ class PixivApplicationTestCase(unittest.TestCase):
     # ---- _handle_crawl_following -----------------------------------------
 
     # pyright: ignore[misc] — unittest requires instance methods
-    def test_handle_crawl_following_summarizes_updated_skipped_and_failed_authors(self) -> None:
+    def test_handle_crawl_following_delegates_to_following_service(self) -> None:
         app = PixivApplication()
         runtime_args = Namespace(following_limit=3, completed_streak_limit=10)
 
         app.author_crawler = cast(AuthorCrawler, MagicMock())
         app.author_crawler.collect_following_user_ids.return_value = ["1", "2", "3"]  # type: ignore[union-attr]
-        app.author_crawler.collect_author_artwork_ids.side_effect = [  # type: ignore[union-attr]
-            ["100"],
-            [],
-            RuntimeError("profile failed"),
-        ]
         app.crawler = MagicMock()
         app.downloader = MagicMock()
-        app.record_repository = MagicMock()
-        selection = IncrementalSelectionResult(
-            candidate_artwork_ids=["100"],
-            total_available_artwork_count=1,
-            scanned_artwork_count=1,
-            new_artwork_ids=["100"],
-            retry_artwork_ids=[],
-            skipped_completed_ids=[],
-            stopped_early=False,
-            stop_after_completed_streak=10,
-        )
-        summary = BatchRunSummary(
-            success_results=[ProcessResult(artwork_id="100")],
-            failed_results=[],
-        )
 
-        with patch("app.application.select_incremental_artwork_ids", return_value=selection), \
-                patch("app.application.process_artwork_batch", return_value=summary) as mocked_process_batch, \
-                patch("app.application.console_service.show_incremental_selection_summary"), \
-                patch("app.application.console_service.show_batch_summary"), \
-                patch("app.application.console_service.show_following_update_summary") as mocked_show_following, \
-                patch("app.application.console_service.pause_before_exit") as mocked_pause, \
-                patch("app.application.logger"):
+        with patch("app.application.process_following_authors") as mocked_process, \
+                patch("app.application.console_service.pause_before_exit") as mocked_pause:
             app._handle_crawl_following(runtime_args=runtime_args, interactive_mode=False)
 
-        mocked_process_batch.assert_called_once_with(
-            artwork_ids=["100"],
+        mocked_process.assert_called_once_with(
+            followed_user_ids=["1", "2", "3"],
+            author_crawler=app.author_crawler,
             crawler=app.crawler,
             downloader=app.downloader,
             record_repository=app.record_repository,
-        )
-        mocked_show_following.assert_called_once_with(
-            followed_user_ids=["1", "2", "3"],
-            updated_authors=["1"],
-            skipped_authors=["2"],
-            failed_authors=[("3", "profile failed")],
-            total_success_results=[ProcessResult(artwork_id="100")],
-            total_failed_results=[],
+            completed_streak_limit=10,
         )
         mocked_pause.assert_not_called()
 

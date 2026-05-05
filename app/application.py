@@ -37,6 +37,7 @@ from app.services.cli_service import (
     show_history,
 )
 from app.services.doctor_service import get_doctor_exit_code, run_doctor, summarize_doctor_report
+from app.services.following_service import process_following_authors
 from app.services.runtime_args_service import (
     action_requires_direct_artwork_input,
     normalize_optional_text,
@@ -346,6 +347,9 @@ class PixivApplication:
     ) -> None:
         """按关注列表更新画师作品。"""
         assert self.author_crawler is not None
+        assert self.crawler is not None
+        assert self.downloader is not None
+
         followed_user_ids = self.author_crawler.collect_following_user_ids(
             limit=runtime_args.following_limit if runtime_args else None,
         )
@@ -353,69 +357,15 @@ class PixivApplication:
             logger.info("当前没有识别到任何已关注画师。")
             return
 
-        logger.info("本次共识别到 %s 个关注画师。", len(followed_user_ids))
-
-        total_success_results: list[Any] = []
-        total_failed_results: list[Any] = []
-        updated_authors: list[str] = []
-        skipped_authors: list[str] = []
-        failed_authors: list[tuple[str, str]] = []
-
-        for index, user_id in enumerate(followed_user_ids, start=1):
-            logger.debug(
-                "========== 开始处理第 %s/%s 个关注画师：%s ==========",
-                index,
-                len(followed_user_ids),
-                user_id,
-            )
-
-            try:
-                author_artwork_ids = self.author_crawler.collect_author_artwork_ids(user_id)
-                if not author_artwork_ids:
-                    logger.debug("作者 %s 当前没有识别到可处理作品，先跳过。", user_id)
-                    skipped_authors.append(user_id)
-                    continue
-
-                selection = select_incremental_artwork_ids(
-                    author_artwork_ids,
-                    self.record_repository,
-                    completed_streak_limit=(
-                        runtime_args.completed_streak_limit if runtime_args else 10
-                    ),
-                )
-                console_service.show_incremental_selection_summary(selection)
-
-                artwork_ids = selection.candidate_artwork_ids
-                if not artwork_ids:
-                    logger.debug("作者 %s 当前没有需要增量处理的新作品。", user_id)
-                    skipped_authors.append(user_id)
-                    continue
-
-                assert self.crawler is not None
-                assert self.downloader is not None
-                summary = process_artwork_batch(
-                    artwork_ids=artwork_ids,
-                    crawler=self.crawler,
-                    downloader=self.downloader,
-                    record_repository=self.record_repository,
-                )
-                console_service.show_batch_summary(summary)
-
-                total_success_results.extend(summary.success_results)
-                total_failed_results.extend(summary.failed_results)
-                updated_authors.append(user_id)
-            except Exception as exc:
-                error_message = str(exc)
-                failed_authors.append((user_id, error_message))
-                logger.warning("作者 %s 处理失败：%s", user_id, error_message)
-
-        console_service.show_following_update_summary(
+        process_following_authors(
             followed_user_ids=followed_user_ids,
-            updated_authors=updated_authors,
-            skipped_authors=skipped_authors,
-            failed_authors=failed_authors,
-            total_success_results=total_success_results,
-            total_failed_results=total_failed_results,
+            author_crawler=self.author_crawler,
+            crawler=self.crawler,
+            downloader=self.downloader,
+            record_repository=self.record_repository,
+            completed_streak_limit=(
+                runtime_args.completed_streak_limit if runtime_args else 10
+            ),
         )
 
         if interactive_mode:
