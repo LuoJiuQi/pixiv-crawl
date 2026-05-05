@@ -205,7 +205,7 @@ def _completed_record_files_exist(existing_record: DownloadRecord) -> bool:
     只要缺少任意一个文件，就认为这条记录已经不能安全跳过，
     需要重新进入正常处理流程自愈。
     """
-    downloaded_files = existing_record.get("downloaded_files", [])
+    downloaded_files = existing_record.downloaded_files
     if not isinstance(downloaded_files, list) or not downloaded_files:
         return False
 
