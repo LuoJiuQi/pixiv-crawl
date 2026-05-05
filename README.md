@@ -248,7 +248,7 @@ python main.py doctor --json
 这一步会确认 Playwright/Chromium 能启动、关键路径可写，并把结果以结构化 JSON 输出出来。
 
 ```powershell
-python -m unittest tests.test_task_service tests.test_author_crawler tests.test_cli_service tests.test_record_exporter tests.test_failure_exporter tests.test_failure_classifier tests.test_db tests.test_main tests.test_parser tests.test_downloader tests.test_console_service tests.test_login tests.test_artwork_crawler tests.test_download_path_builder tests.test_download_planner -v
+python -m unittest discover -s tests -v
 ```
 
 ## 🐳 Docker 运行

@@ -32,7 +32,3 @@ data/temp/
 # Temporary / local-only cache
 *.log
 
-# Local Chinese notes
-项目构建-环境配置.md
-项目结构-代码编写.md
-项目结构.md
