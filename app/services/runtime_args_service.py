@@ -11,7 +11,7 @@
 
 import argparse
 
-from app.services.cli_service import parse_artwork_ids, parse_user_id
+from app.services.cli_service import AuthorCollectOptions, parse_artwork_ids, parse_user_id
 
 
 def action_requires_direct_artwork_input(action: str) -> bool:
@@ -163,12 +163,12 @@ def parse_runtime_arguments(argv: list[str] | None) -> argparse.Namespace | None
             parser.error("--limit 不能小于 0。")
         if args.completed_streak_limit <= 0:
             parser.error("--completed-streak-limit 必须大于 0。")
-        args.author_request = {
-            "user_id": user_id,
-            "limit": args.limit or None,
-            "update_mode": args.update_mode,
-            "completed_streak_limit": args.completed_streak_limit,
-        }
+        args.author_request = AuthorCollectOptions(
+            user_id=user_id,
+            limit=args.limit or None,
+            update_mode=args.update_mode,
+            completed_streak_limit=args.completed_streak_limit,
+        )
 
     if raw_action == "crawl-following":
         if args.limit < 0:

@@ -16,7 +16,9 @@ from __future__ import annotations
 import json
 import tempfile
 from pathlib import Path
-from typing import Literal, TypedDict
+from typing import Literal
+
+from pydantic import BaseModel, Field
 
 from app.browser.client import BrowserClient
 from app.browser.login import PixivLoginService
@@ -25,22 +27,18 @@ from app.core.config import settings
 DoctorStatus = Literal["ok", "warn", "error", "skip"]
 
 
-class DoctorCheck(TypedDict):
-    name: str
-    status: DoctorStatus
-    detail: str
+class DoctorCheck(BaseModel):
+    name: str = ""
+    status: DoctorStatus = "ok"
+    detail: str = ""
 
 
-class DoctorReport(TypedDict):
-    checks: list[DoctorCheck]
+class DoctorReport(BaseModel):
+    checks: list[DoctorCheck] = Field(default_factory=list)
 
 
 def _build_check(name: str, status: DoctorStatus, detail: str) -> DoctorCheck:
-    return {
-        "name": name,
-        "status": status,
-        "detail": detail,
-    }
+    return DoctorCheck(name=name, status=status, detail=detail)
 
 
 def _check_credentials() -> DoctorCheck:
@@ -161,13 +159,13 @@ def run_doctor() -> DoctorReport:
     ]
     checks.extend(_check_browser_runtime())
 
-    return {"checks": checks}
+    return DoctorReport(checks=checks)
 
 
 def summarize_doctor_report(report: DoctorReport) -> dict[str, int]:
     summary = {"ok": 0, "warn": 0, "error": 0, "skip": 0}
-    for check in report["checks"]:
-        summary[check["status"]] += 1
+    for check in report.checks:
+        summary[check.status] += 1
     return summary
 
 

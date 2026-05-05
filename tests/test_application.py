@@ -7,6 +7,7 @@ from app.application import PixivApplication
 from app.crawler.author_crawler import AuthorCrawler
 from app.schemas.task import BatchRunSummary, IncrementalSelectionResult, ProcessResult
 from app.services.cli_service import AuthorCollectOptions
+from app.services.doctor_service import DoctorCheck, DoctorReport
 
 
 class PixivApplicationTestCase(unittest.TestCase):
@@ -17,7 +18,7 @@ class PixivApplicationTestCase(unittest.TestCase):
     def test_handle_doctor_writes_json_and_skips_human_output_when_json_requested(self) -> None:
         app = PixivApplication()
         runtime_args = Namespace(strict=True, output="data/doctor.json", json_output=True)
-        report = {"checks": [{"name": "浏览器启动", "status": "ok", "detail": "ok"}]}
+        report = DoctorReport(checks=[DoctorCheck(name="浏览器启动", status="ok", detail="ok")])
         summary = {"ok": 1, "warn": 0, "error": 0, "skip": 0}
 
         with patch("app.application.run_doctor", return_value=report), \
@@ -30,7 +31,7 @@ class PixivApplicationTestCase(unittest.TestCase):
             exit_code = app._handle_doctor(runtime_args=runtime_args, interactive_mode=False)
 
         expected_payload = {
-            "checks": report["checks"],
+            "checks": report.checks,
             "summary": summary,
             "strict": True,
             "exit_code": 0,
@@ -100,12 +101,12 @@ class PixivApplicationTestCase(unittest.TestCase):
                 patch("app.application.console_service.show_incremental_selection_summary") as mocked_show_selection, \
                 patch("app.application.logger"):
             _ = app._handle_crawl_author(
-                author_request=cast(AuthorCollectOptions, {
-                    "user_id": "123",
-                    "limit": 20,
-                    "update_mode": "incremental",
-                    "completed_streak_limit": 10,
-                }),
+                author_request=AuthorCollectOptions(
+                    user_id="123",
+                    limit=20,
+                    update_mode="incremental",
+                    completed_streak_limit=10,
+                ),
                 interactive_mode=False,
             )
 

@@ -134,7 +134,7 @@ class PixivApplication:
         strict = bool(runtime_args.strict) if runtime_args else False
         exit_code = get_doctor_exit_code(report, strict=strict)
         payload = {
-            "checks": report["checks"],
+            "checks": report.checks,
             "summary": summary,
             "strict": strict,
             "exit_code": exit_code,
@@ -312,8 +312,8 @@ class PixivApplication:
             raise RuntimeError("作者抓取模式缺少作者输入，请重新选择操作。")
 
         assert self.author_crawler is not None
-        user_id = author_request["user_id"]
-        limit = author_request["limit"]
+        user_id = author_request.user_id
+        limit = author_request.limit
         author_artwork_ids = self.author_crawler.collect_author_artwork_ids(user_id, limit=limit)
         if not author_artwork_ids:
             logger.warning("未从作者 %s 的主页里识别到作品 ID。", user_id)
@@ -321,11 +321,11 @@ class PixivApplication:
 
         logger.info("已从作者 %s 主页识别到 %s 个作品。", user_id, len(author_artwork_ids))
 
-        if author_request["update_mode"] == "incremental":
+        if author_request.update_mode == "incremental":
             selection = select_incremental_artwork_ids(
                 author_artwork_ids,
                 self.record_repository,
-                completed_streak_limit=author_request["completed_streak_limit"],
+                completed_streak_limit=author_request.completed_streak_limit,
             )
             artwork_ids = selection.candidate_artwork_ids
             console_service.show_incremental_selection_summary(selection)

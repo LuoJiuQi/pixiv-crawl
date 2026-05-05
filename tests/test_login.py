@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
-from app.browser.login import PixivLoginService
+from app.browser.login import LoginResult, PixivLoginService
 
 
 class PixivLoginServiceTestCase(unittest.TestCase):
@@ -34,8 +34,8 @@ class PixivLoginServiceTestCase(unittest.TestCase):
         ):
             result = service.login_automatically()
 
-        self.assertFalse(result["success"])
-        self.assertEqual(result["issue"], "missing_credentials")
+        self.assertFalse(result.success)
+        self.assertEqual(result.issue, "missing_credentials")
 
     def test_get_submit_control_prefers_structural_submit_selector(self) -> None:
         service, _, _ = self._build_service()
@@ -87,7 +87,7 @@ class PixivLoginServiceTestCase(unittest.TestCase):
         ), patch.object(
             service,
             "_fill_login_form",
-            return_value={"success": False, "issue": "", "requires_manual_action": False, "state_saved": False},
+            return_value=LoginResult(),
         ) as mocked_fill, patch.object(
             service,
             "_has_recaptcha_prompt",
@@ -97,17 +97,12 @@ class PixivLoginServiceTestCase(unittest.TestCase):
             "is_logged_in",
             return_value=False,
         ), patch("app.browser.login.console_service.show_warning"):
-            mocked_fill.return_value = {
-                "success": True,
-                "issue": "",
-                "requires_manual_action": False,
-                "state_saved": False,
-            }
+            mocked_fill.return_value = LoginResult(success=True)
             page.wait_for_url.side_effect = PlaywrightTimeoutError("timeout")
             result = service.login_automatically()
 
-        self.assertFalse(result["success"])
-        self.assertEqual(result["issue"], "recaptcha")
+        self.assertFalse(result.success)
+        self.assertEqual(result.issue, "recaptcha")
 
     def test_wait_for_manual_login_returns_timeout_issue(self) -> None:
         service, _, page = self._build_service()
@@ -118,8 +113,8 @@ class PixivLoginServiceTestCase(unittest.TestCase):
         ), patch("app.browser.login.console_service.show_success"):
             result = service.wait_for_manual_login(timeout=1000)
 
-        self.assertFalse(result["success"])
-        self.assertEqual(result["issue"], "manual_login_timeout")
+        self.assertFalse(result.success)
+        self.assertEqual(result.issue, "manual_login_timeout")
 
     def test_login_and_save_state_returns_headless_manual_required(self) -> None:
         service, _, _ = self._build_service()
@@ -127,12 +122,7 @@ class PixivLoginServiceTestCase(unittest.TestCase):
         with patch.object(
             service,
             "login_automatically",
-            return_value={
-                "success": False,
-                "issue": "recaptcha",
-                "requires_manual_action": True,
-                "state_saved": False,
-            },
+            return_value=LoginResult(success=False, issue="recaptcha", requires_manual_action=True),
         ), patch("app.browser.login.settings.headless", True), patch(
             "app.browser.login.console_service.show_error"
         ), patch("app.browser.login.console_service.show_warning"), patch(
@@ -140,8 +130,8 @@ class PixivLoginServiceTestCase(unittest.TestCase):
         ):
             result = service.login_and_save_state()
 
-        self.assertFalse(result["success"])
-        self.assertEqual(result["issue"], "headless_manual_required")
+        self.assertFalse(result.success)
+        self.assertEqual(result.issue, "headless_manual_required")
 
     def test_login_and_save_state_saves_state_after_success(self) -> None:
         service, client, _ = self._build_service()
@@ -149,18 +139,13 @@ class PixivLoginServiceTestCase(unittest.TestCase):
         with patch.object(
             service,
             "login_automatically",
-            return_value={
-                "success": True,
-                "issue": "",
-                "requires_manual_action": False,
-                "state_saved": False,
-            },
+            return_value=LoginResult(success=True),
         ), patch("app.browser.login.console_service.show_success"):
             result = service.login_and_save_state()
 
         client.save_storage_state.assert_called_once()
-        self.assertTrue(result["success"])
-        self.assertTrue(result["state_saved"])
+        self.assertTrue(result.success)
+        self.assertTrue(result.state_saved)
 
     def test_login_flow_uses_console_for_user_guidance(self) -> None:
         service, _, _ = self._build_service()
@@ -168,12 +153,7 @@ class PixivLoginServiceTestCase(unittest.TestCase):
         with patch.object(
             service,
             "login_automatically",
-            return_value={
-                "success": False,
-                "issue": "recaptcha",
-                "requires_manual_action": True,
-                "state_saved": False,
-            },
+            return_value=LoginResult(success=False, issue="recaptcha", requires_manual_action=True),
         ), patch("app.browser.login.settings.headless", True), patch(
             "app.browser.login.console_service.show_error"
         ) as mocked_show_error:

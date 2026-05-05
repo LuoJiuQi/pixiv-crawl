@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from app.schemas.task import BatchRunSummary, FailedResult, IncrementalSelectionResult, ProcessResult
+from app.services.doctor_service import DoctorCheck, DoctorReport
 import main
 from app import application as app_module
 
@@ -263,11 +264,9 @@ class MainInputParsingTestCase(unittest.TestCase):
     def test_main_routes_doctor_command_without_initializing_database(self) -> None:
         mock_client = MagicMock()
         mock_repository = MagicMock()
-        report = {
-            "checks": [
-                {"name": "浏览器启动", "status": "ok", "detail": "ok"},
-            ]
-        }
+        report = DoctorReport(checks=[
+            DoctorCheck(name="浏览器启动", status="ok", detail="ok"),
+        ])
 
         with patch("app.application.BrowserClient", return_value=mock_client), patch(
             "app.application.DownloadRecordRepository",
@@ -308,11 +307,9 @@ class MainInputParsingTestCase(unittest.TestCase):
     def test_main_routes_doctor_strict_mode_to_nonzero_exit_code(self) -> None:
         mock_client = MagicMock()
         mock_repository = MagicMock()
-        report = {
-            "checks": [
-                {"name": "账号密码", "status": "warn", "detail": "missing"},
-            ]
-        }
+        report = DoctorReport(checks=[
+            DoctorCheck(name="账号密码", status="warn", detail="missing"),
+        ])
 
         with patch("app.application.BrowserClient", return_value=mock_client), patch(
             "app.application.DownloadRecordRepository",
@@ -345,12 +342,10 @@ class MainInputParsingTestCase(unittest.TestCase):
     def test_main_routes_doctor_json_output_without_human_summary(self) -> None:
         mock_client = MagicMock()
         mock_repository = MagicMock()
-        report = {
-            "checks": [
-                {"name": "浏览器启动", "status": "ok", "detail": "ok"},
-                {"name": "登录态有效性", "status": "skip", "detail": "missing"},
-            ]
-        }
+        report = DoctorReport(checks=[
+            DoctorCheck(name="浏览器启动", status="ok", detail="ok"),
+            DoctorCheck(name="登录态有效性", status="skip", detail="missing"),
+        ])
         summary = {"ok": 1, "warn": 0, "error": 0, "skip": 1}
 
         with patch("app.application.BrowserClient", return_value=mock_client), patch(
@@ -379,7 +374,7 @@ class MainInputParsingTestCase(unittest.TestCase):
         mocked_get_exit_code.assert_called_once_with(report, strict=False)
         mocked_show_json.assert_called_once_with(
             {
-                "checks": report["checks"],
+                "checks": report.checks,
                 "summary": summary,
                 "strict": False,
                 "exit_code": 0,
@@ -393,11 +388,9 @@ class MainInputParsingTestCase(unittest.TestCase):
     def test_main_routes_doctor_output_file_with_human_summary(self) -> None:
         mock_client = MagicMock()
         mock_repository = MagicMock()
-        report = {
-            "checks": [
-                {"name": "浏览器启动", "status": "ok", "detail": "ok"},
-            ]
-        }
+        report = DoctorReport(checks=[
+            DoctorCheck(name="浏览器启动", status="ok", detail="ok"),
+        ])
         summary = {"ok": 1, "warn": 0, "error": 0, "skip": 0}
 
         with patch("app.application.BrowserClient", return_value=mock_client), patch(
@@ -429,7 +422,7 @@ class MainInputParsingTestCase(unittest.TestCase):
 
         mocked_write_json_file.assert_called_once_with(
             {
-                "checks": report["checks"],
+                "checks": report.checks,
                 "summary": summary,
                 "strict": False,
                 "exit_code": 0,
@@ -449,11 +442,9 @@ class MainInputParsingTestCase(unittest.TestCase):
     def test_main_routes_doctor_json_output_can_write_file_at_same_time(self) -> None:
         mock_client = MagicMock()
         mock_repository = MagicMock()
-        report = {
-            "checks": [
-                {"name": "浏览器启动", "status": "ok", "detail": "ok"},
-            ]
-        }
+        report = DoctorReport(checks=[
+            DoctorCheck(name="浏览器启动", status="ok", detail="ok"),
+        ])
         summary = {"ok": 1, "warn": 0, "error": 0, "skip": 0}
 
         with patch("app.application.BrowserClient", return_value=mock_client), patch(
@@ -484,7 +475,7 @@ class MainInputParsingTestCase(unittest.TestCase):
             exit_code = main.main(["doctor", "--json", "--output", "data/doctor.json"])
 
         payload = {
-            "checks": report["checks"],
+            "checks": report.checks,
             "summary": summary,
             "strict": False,
             "exit_code": 0,

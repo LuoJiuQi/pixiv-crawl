@@ -14,7 +14,9 @@
 from datetime import datetime, timedelta
 from pathlib import Path
 import re
-from typing import Literal, TypedDict
+from typing import Literal
+
+from pydantic import BaseModel
 
 from app.db.download_record_repository import DownloadRecordRepository
 from app.services import console_service
@@ -22,15 +24,15 @@ from app.services.failure_exporter import build_failure_export_path, export_fail
 from app.services.record_exporter import build_record_export_path, export_records
 
 
-class AuthorCollectOptions(TypedDict):
+class AuthorCollectOptions(BaseModel):
     """
-    描述“按作者抓取”模式收集到的输入参数。
+    描述"按作者抓取"模式收集到的输入参数。
     """
 
-    user_id: str
-    limit: int | None
-    update_mode: Literal["incremental", "full"]
-    completed_streak_limit: int
+    user_id: str = ""
+    limit: int | None = None
+    update_mode: Literal["incremental", "full"] = "incremental"
+    completed_streak_limit: int = 10
 
 
 def choose_action() -> str:
@@ -192,12 +194,12 @@ def collect_author_options() -> AuthorCollectOptions:
         if raw_streak_limit.isdigit() and int(raw_streak_limit) > 0:
             completed_streak_limit = int(raw_streak_limit)
 
-    return {
-        "user_id": user_id,
-        "limit": limit,
-        "update_mode": update_mode,
-        "completed_streak_limit": completed_streak_limit,
-    }
+    return AuthorCollectOptions(
+        user_id=user_id,
+        limit=limit,
+        update_mode=update_mode,
+        completed_streak_limit=completed_streak_limit,
+    )
 
 
 def collect_history_options() -> tuple[str | None, str | None, int]:

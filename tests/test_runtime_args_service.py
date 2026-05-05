@@ -61,16 +61,17 @@ class RuntimeArgsServiceTestCase(unittest.TestCase):
             ]
         )
 
+        from app.services.cli_service import AuthorCollectOptions
         self.assertIsNotNone(args)
         self.assertEqual(args.action, "crawl_author")
         self.assertEqual(
             args.author_request,
-            {
-                "user_id": "123456",
-                "limit": 20,
-                "update_mode": "full",
-                "completed_streak_limit": 15,
-            },
+            AuthorCollectOptions(
+                user_id="123456",
+                limit=20,
+                update_mode="full",
+                completed_streak_limit=15,
+            ),
         )
 
     def test_parse_runtime_arguments_supports_crawl_following_options(self) -> None:

@@ -10,9 +10,10 @@
 而是“自动优先，必要时人工兜底”。
 """
 
-from typing import Any, TypedDict
+from typing import Any
 
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError  # noqa
+from pydantic import BaseModel
 
 from app.browser.client import BrowserClient
 from app.core.config import settings
@@ -23,11 +24,11 @@ from app.services import console_service
 logger = get_logger(__name__)
 
 
-class LoginResult(TypedDict):
-    success: bool
-    requires_manual_action: bool
-    state_saved: bool
-    issue: str
+class LoginResult(BaseModel):
+    success: bool = False
+    requires_manual_action: bool = False
+    state_saved: bool = False
+    issue: str = ""
 
 
 class PixivLoginService:
@@ -95,12 +96,12 @@ class PixivLoginService:
         requires_manual_action: bool = False,
         state_saved: bool = False,
     ) -> LoginResult:
-        return {
-            "success": success,
-            "requires_manual_action": requires_manual_action,
-            "state_saved": state_saved,
-            "issue": issue,
-        }
+        return LoginResult(
+            success=success,
+            requires_manual_action=requires_manual_action,
+            state_saved=state_saved,
+            issue=issue,
+        )
 
     def open_login_page(self) -> None:
         """
@@ -373,7 +374,7 @@ class PixivLoginService:
         self._dismiss_cookie_banner()
 
         fill_result = self._fill_login_form()
-        if not fill_result["success"]:
+        if not fill_result.success:
             return fill_result
 
         form = self._get_login_form()
@@ -449,16 +450,16 @@ class PixivLoginService:
         - 最后再保存登录状态
         """
         auto_result = self.login_automatically(timeout=timeout)
-        if auto_result["success"]:
+        if auto_result.success:
             saved_result = self.save_login_state()
             console_service.show_success("Pixiv 自动登录成功。")
-            return self._build_result(success=True, state_saved=saved_result["state_saved"])
+            return self._build_result(success=True, state_saved=saved_result.state_saved)
 
         # 如果当前是无头模式，看不到浏览器界面，
         # 那么人工补验证码也没有意义，所以直接返回失败。
         if settings.headless:
             console_service.show_error("当前处于无头模式，无法人工补充验证码或二次验证。")
-            if auto_result["issue"] == "recaptcha":
+            if auto_result.issue == "recaptcha":
                 console_service.show_error(
                     "这次失败的直接原因是 reCAPTCHA；请把 HEADLESS 设为 false 后，在可见浏览器里完成人工验证。"
                 )
@@ -467,7 +468,7 @@ class PixivLoginService:
 
         console_service.show_warning("自动登录未完成，准备切换为人工补充验证。")
         manual_result = self.wait_for_manual_login(timeout=timeout)
-        if not manual_result["success"]:
+        if not manual_result.success:
             console_service.show_error("登录失败，未保存登录状态。")
             return manual_result
 
@@ -476,5 +477,5 @@ class PixivLoginService:
         return self._build_result(
             success=True,
             requires_manual_action=True,
-            state_saved=saved_result["state_saved"],
+            state_saved=saved_result.state_saved,
         )

@@ -4,7 +4,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import MagicMock, patch
 
 from app.services import doctor_service
-from app.services.doctor_service import get_doctor_exit_code, run_doctor, summarize_doctor_report
+from app.services.doctor_service import DoctorCheck, DoctorReport, get_doctor_exit_code, run_doctor, summarize_doctor_report
 
 
 class DoctorServiceTestCase(unittest.TestCase):
@@ -44,11 +44,11 @@ class DoctorServiceTestCase(unittest.TestCase):
             ):
                 report = run_doctor()
 
-        checks_by_name = {check["name"]: check for check in report["checks"]}
-        self.assertEqual(checks_by_name["账号密码"]["status"], "warn")
-        self.assertEqual(checks_by_name["登录态文件"]["status"], "warn")
-        self.assertEqual(checks_by_name["浏览器启动"]["status"], "ok")
-        self.assertEqual(checks_by_name["登录态有效性"]["status"], "skip")
+        checks_by_name = {check.name: check for check in report.checks}
+        self.assertEqual(checks_by_name["账号密码"].status, "warn")
+        self.assertEqual(checks_by_name["登录态文件"].status, "warn")
+        self.assertEqual(checks_by_name["浏览器启动"].status, "ok")
+        self.assertEqual(checks_by_name["登录态有效性"].status, "skip")
 
     def test_run_doctor_reports_invalid_proxy_and_login_state(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -105,11 +105,11 @@ class DoctorServiceTestCase(unittest.TestCase):
             ):
                 report = run_doctor()
 
-        checks_by_name = {check["name"]: check for check in report["checks"]}
-        self.assertEqual(checks_by_name["账号密码"]["status"], "ok")
-        self.assertEqual(checks_by_name["代理配置"]["status"], "warn")
-        self.assertEqual(checks_by_name["登录态文件"]["status"], "ok")
-        self.assertEqual(checks_by_name["登录态有效性"]["status"], "warn")
+        checks_by_name = {check.name: check for check in report.checks}
+        self.assertEqual(checks_by_name["账号密码"].status, "ok")
+        self.assertEqual(checks_by_name["代理配置"].status, "warn")
+        self.assertEqual(checks_by_name["登录态文件"].status, "ok")
+        self.assertEqual(checks_by_name["登录态有效性"].status, "warn")
 
     def test_run_doctor_reports_browser_start_failure(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -139,21 +139,19 @@ class DoctorServiceTestCase(unittest.TestCase):
             ):
                 report = run_doctor()
 
-        checks_by_name = {check["name"]: check for check in report["checks"]}
-        self.assertEqual(checks_by_name["浏览器启动"]["status"], "error")
+        checks_by_name = {check.name: check for check in report.checks}
+        self.assertEqual(checks_by_name["浏览器启动"].status, "error")
         mock_client.close.assert_called_once()
 
     def test_summarize_doctor_report_counts_each_status(self) -> None:
         summary = summarize_doctor_report(
-            {
-                "checks": [
-                    {"name": "a", "status": "ok", "detail": ""},
-                    {"name": "b", "status": "warn", "detail": ""},
-                    {"name": "c", "status": "warn", "detail": ""},
-                    {"name": "d", "status": "error", "detail": ""},
-                    {"name": "e", "status": "skip", "detail": ""},
-                ]
-            }
+            DoctorReport(checks=[
+                DoctorCheck(name="a", status="ok"),
+                DoctorCheck(name="b", status="warn"),
+                DoctorCheck(name="c", status="warn"),
+                DoctorCheck(name="d", status="error"),
+                DoctorCheck(name="e", status="skip"),
+            ])
         )
 
         self.assertEqual(
@@ -163,23 +161,19 @@ class DoctorServiceTestCase(unittest.TestCase):
 
     def test_get_doctor_exit_code_returns_zero_when_only_warn_without_strict(self) -> None:
         exit_code = get_doctor_exit_code(
-            {
-                "checks": [
-                    {"name": "a", "status": "ok", "detail": ""},
-                    {"name": "b", "status": "warn", "detail": ""},
-                ]
-            }
+            DoctorReport(checks=[
+                DoctorCheck(name="a", status="ok"),
+                DoctorCheck(name="b", status="warn"),
+            ])
         )
 
         self.assertEqual(exit_code, 0)
 
     def test_get_doctor_exit_code_returns_one_for_warn_in_strict_mode(self) -> None:
         exit_code = get_doctor_exit_code(
-            {
-                "checks": [
-                    {"name": "a", "status": "warn", "detail": ""},
-                ]
-            },
+            DoctorReport(checks=[
+                DoctorCheck(name="a", status="warn"),
+            ]),
             strict=True,
         )
 
@@ -187,12 +181,10 @@ class DoctorServiceTestCase(unittest.TestCase):
 
     def test_get_doctor_exit_code_returns_one_when_error_exists(self) -> None:
         exit_code = get_doctor_exit_code(
-            {
-                "checks": [
-                    {"name": "a", "status": "error", "detail": ""},
-                    {"name": "b", "status": "warn", "detail": ""},
-                ]
-            }
+            DoctorReport(checks=[
+                DoctorCheck(name="a", status="error"),
+                DoctorCheck(name="b", status="warn"),
+            ])
         )
 
         self.assertEqual(exit_code, 1)

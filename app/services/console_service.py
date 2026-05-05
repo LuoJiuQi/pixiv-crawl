@@ -185,8 +185,8 @@ def show_following_update_summary(
 
 def show_doctor_report(report: "DoctorReport") -> None:
     show_section("运行环境自检")
-    for check in report["checks"]:
-        _emit_text(f"[{check['status'].upper()}] {check['name']}：{check['detail']}")
+    for check in report.checks:
+        _emit_text(f"[{check.status.upper()}] {check.name}：{check.detail}")
 
 
 def show_json(payload: object) -> None:
