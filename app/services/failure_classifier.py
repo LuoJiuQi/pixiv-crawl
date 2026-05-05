@@ -1,19 +1,28 @@
 """
-这个文件负责“给失败原因做分类”。
+这个文件负责"给失败原因做分类"。
 
-原始异常文本虽然有用，但它通常比较散：
-- 有的写中文
-- 有的写英文
-- 有的带 URL
-- 有的只是一句超时
-
-所以这里额外做一层“错误类型归类”，
-方便后面查看历史记录、筛选问题和决定优先排查方向。
+优先使用自定义异常的类型匹配（isinstance），
+对标准库异常或 httpx 异常也做类型优先分类，
+最后回退到字符串关键字匹配。
 """
 
 import re
 
 import httpx
+
+from app.exceptions import (
+    ArtworkUnavailableError,
+    BrowserError,
+    DownloadError,
+    Http5xxError,
+    InputError,
+    LoginError,
+    NetworkError,
+    ParseError,
+    PixivCrawlError,
+    RateLimitError,
+    TimeoutError,
+)
 
 
 def _classify_http_status(status_code: int) -> str:
@@ -43,6 +52,31 @@ def classify_failure(error: str | BaseException) -> str:
     - browser
     - unknown
     """
+    # 1) 自定义异常 — 类型匹配
+    if isinstance(error, LoginError):
+        return "login"
+    if isinstance(error, RateLimitError):
+        return "rate_limit"
+    if isinstance(error, Http5xxError):
+        return "http_5xx"
+    if isinstance(error, TimeoutError):
+        return "timeout"
+    if isinstance(error, ArtworkUnavailableError):
+        return "artwork_unavailable"
+    if isinstance(error, DownloadError):
+        return "download"
+    if isinstance(error, NetworkError):
+        return "network"
+    if isinstance(error, ParseError):
+        return "parse"
+    if isinstance(error, BrowserError):
+        return "browser"
+    if isinstance(error, InputError):
+        return "input"
+    if isinstance(error, PixivCrawlError):
+        return "unknown"
+
+    # 2) 标准库 / httpx 异常 — 类型匹配
     if isinstance(error, httpx.HTTPStatusError):
         http_err: httpx.HTTPStatusError = error
         return _classify_http_status(http_err.response.status_code)
@@ -53,6 +87,7 @@ def classify_failure(error: str | BaseException) -> str:
     if isinstance(error, httpx.RequestError):
         return "network"
 
+    # 3) 回退 — 字符串关键字匹配
     normalized = str(error).strip().lower()
 
     if not normalized:
