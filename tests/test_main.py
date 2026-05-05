@@ -14,12 +14,7 @@ class MainInputParsingTestCase(unittest.TestCase):
 
         mock_repository = MagicMock()
         mock_login_service = MagicMock()
-        mock_login_service.login_and_save_state.return_value = {
-            "success": False,
-            "issue": "headless_manual_required",
-            "requires_manual_action": False,
-            "state_saved": False,
-        }
+        mock_login_service.login_and_save_state.return_value = MagicMock(success=False)
 
         with patch("app.application.BrowserClient", return_value=mock_client), patch(
             "app.application.DownloadRecordRepository",
@@ -50,12 +45,7 @@ class MainInputParsingTestCase(unittest.TestCase):
         mock_client.state_manager.state_exists.return_value = False
         mock_repository = MagicMock()
         mock_login_service = MagicMock()
-        mock_login_service.login_and_save_state.return_value = {
-            "success": False,
-            "issue": "headless_manual_required",
-            "requires_manual_action": False,
-            "state_saved": False,
-        }
+        mock_login_service.login_and_save_state.return_value = MagicMock(success=False)
 
         with patch("app.application.BrowserClient", return_value=mock_client), patch(
             "app.application.DownloadRecordRepository",
@@ -374,7 +364,7 @@ class MainInputParsingTestCase(unittest.TestCase):
         mocked_get_exit_code.assert_called_once_with(report, strict=False)
         mocked_show_json.assert_called_once_with(
             {
-                "checks": report.checks,
+                "checks": [check.model_dump() for check in report.checks],
                 "summary": summary,
                 "strict": False,
                 "exit_code": 0,
@@ -422,7 +412,7 @@ class MainInputParsingTestCase(unittest.TestCase):
 
         mocked_write_json_file.assert_called_once_with(
             {
-                "checks": report.checks,
+                "checks": [check.model_dump() for check in report.checks],
                 "summary": summary,
                 "strict": False,
                 "exit_code": 0,
@@ -475,7 +465,7 @@ class MainInputParsingTestCase(unittest.TestCase):
             exit_code = main.main(["doctor", "--json", "--output", "data/doctor.json"])
 
         payload = {
-            "checks": report.checks,
+            "checks": [check.model_dump() for check in report.checks],
             "summary": summary,
             "strict": False,
             "exit_code": 0,

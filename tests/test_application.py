@@ -31,7 +31,7 @@ class PixivApplicationTestCase(unittest.TestCase):
             exit_code = app._handle_doctor(runtime_args=runtime_args, interactive_mode=False)
 
         expected_payload = {
-            "checks": report.checks,
+            "checks": [check.model_dump() for check in report.checks],
             "summary": summary,
             "strict": True,
             "exit_code": 0,
@@ -61,12 +61,14 @@ class PixivApplicationTestCase(unittest.TestCase):
         mocked_logger.info.assert_called_once_with("检测到已有可用登录状态，无需重新登录。")
 
     def test_ensure_logged_in_deletes_invalid_state_and_stops_when_login_fails(self) -> None:
+        from app.browser.login import LoginResult
+
         app = PixivApplication()
         app.client = cast(Any, MagicMock())
         app.client.state_manager.state_exists.return_value = True
         app.login_service = cast(Any, MagicMock())
         app.login_service.is_logged_in.return_value = False
-        app.login_service.login_and_save_state.return_value = {"success": False}
+        app.login_service.login_and_save_state.return_value = LoginResult(success=False)
 
         with patch("app.application.logger") as mocked_logger:
             result = app._ensure_logged_in()

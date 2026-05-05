@@ -290,14 +290,14 @@ class PixivApplication:
             logger.warning("已有登录状态失效，准备重新登录。")
             state_manager.delete_state()
             login_result = self.login_service.login_and_save_state()
-            if not login_result["success"]:
+            if not login_result.success:
                 logger.error("登录未完成，程序结束。")
                 return False
             return True
 
         logger.info("未检测到登录状态，准备首次登录。")
         login_result = self.login_service.login_and_save_state()
-        if not login_result["success"]:
+        if not login_result.success:
             logger.error("登录未完成，程序结束。")
             return False
         return True
