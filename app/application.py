@@ -134,7 +134,7 @@ class PixivApplication:
         strict = bool(runtime_args.strict) if runtime_args else False
         exit_code = get_doctor_exit_code(report, strict=strict)
         payload = {
-            "checks": report.checks,
+            "checks": [check.model_dump() for check in report.checks],
             "summary": summary,
             "strict": strict,
             "exit_code": exit_code,
